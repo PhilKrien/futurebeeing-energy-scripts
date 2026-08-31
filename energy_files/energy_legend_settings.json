@@ -1,0 +1,51 @@
+{"invisible_fields_oep": {
+    "buildings": ["heat_demand_1", "heat_demand_2", "heat_demand_3",
+    "heat_cluster_1", "heat_cluster_2", "heat_cluster_3", "roof_area_south", "roof_area_eastwest", "pv_activated"], 
+    "systems": ["gas_boiler_cap_invest", "gas_boiler_cost_invest", "system_id"]
+    }
+,
+  "refurbishment_state": {
+    "key": "refurbishment_state",
+    "labels": {
+      "1": "Existing",
+      "2": "Usual refurbishment",
+      "3": "Advanced refurbishment"
+    },
+    "colours": {
+      "1": "#ff0000",
+      "2": "#FFE30F",
+      "3": "#26c40e"
+    },
+    "source": {
+      "label": "Refurbishment state",
+      "category": "ENERGY",
+      "buckets": [
+        {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#ff0000"},
+        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#FFE30F"},
+        {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#26c40e"}
+      ]
+    }
+  },
+  "tech": {
+    "key": "heat_technology",
+    "labels": {
+      "hp": "Air heat pump",
+      "gas": "Gas boiler",
+      "district_heat": "District heat"
+    },
+    "colours": {
+      "hp": "#147004",
+      "gas": "#d20505",
+      "district_heat": "#073392"
+    },
+    "source": {
+      "label": "Heating technology",
+      "category": "ENERGY",
+      "buckets": [
+        {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#147004"},
+        {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#d20505"},
+        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#073392"}
+      ]
+    }
+  }
+}

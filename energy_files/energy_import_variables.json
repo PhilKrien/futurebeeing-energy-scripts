@@ -1,0 +1,77 @@
+{
+  "column_names": {
+    "gas_only": [
+      "id", "system_id",
+      "building_electricity_cost", "building_electricity_emissions",
+      "gas_heating_cap_invest", "gas_heating_cost_invest", "gas_heating_costs_om", "gas_heating_cost_periodical",
+      "gas_heating_energy_import", "gas_heating_import_cost", "gas_heating_production", "gas_heating_emissions",
+      "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
+      "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+    ],
+    "gas_pv": [
+      "id", "system_id",
+      "building_electricity_cost", "building_electricity_emissions",
+      "gas_heating_cap_invest", "gas_heating_cost_invest", "gas_heating_costs_om", "gas_heating_cost_periodical", "gas_heating_energy_import", "gas_heating_import_cost", "gas_heating_production", "gas_heating_emissions",
+      "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
+      "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
+      "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
+      "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
+      "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
+      "photovoltaic_production", "photovoltaic_profits",
+      "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+    ],
+    "hp_only": [
+      "id", "system_id",
+      "building_electricity_cost", "building_electricity_emissions",
+      "ashp_cap_invest", "ashp_cost_invest", "ashp_costs_om", "ashp_cost_periodical", "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
+      "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
+      "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+    ],
+    "hp_pv": [
+      "id", "system_id",
+      "building_electricity_cost", "building_electricity_emissions",
+      "ashp_cap_invest", "ashp_cost_invest", "ashp_costs_om", "ashp_cost_periodical", "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
+      "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
+      "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
+      "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
+      "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
+      "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
+      "photovoltaic_production", "photovoltaic_profits",
+      "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+    ]
+  },
+  "static_cols": {
+    "gas_only": [
+      "size_class",
+      "nearest_city",
+      "elec_cluster",
+      "heat_cluster"
+    ],
+    "gas_pv": [
+      "size_class",
+      "nearest_city",
+      "elec_cluster",
+      "roof_type",
+      "roof_cluster_eastwest",
+      "roof_cluster_south",
+      "heat_cluster"
+    ],
+    "hp_only": [
+      "size_class",
+      "nearest_city",
+      "elec_cluster",
+      "heat_cluster",
+      "refurbishment_state"
+    ],
+    "hp_pv": [
+      "size_class",
+      "nearest_city",
+      "elec_cluster",
+      "roof_type",
+      "roof_cluster_eastwest",
+      "roof_cluster_south",
+      "heat_cluster",
+      "refurbishment_state"
+    ]
+  }
+}
