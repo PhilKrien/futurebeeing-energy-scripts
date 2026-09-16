@@ -3,12 +3,12 @@
         "name": "total_heat_demand",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "OEP Dataset",
         "category": "ENERGY",
@@ -18,12 +18,12 @@
         "name": "total_electricity_demand",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "OEP Dataset",
         "category": "ENERGY",
@@ -33,12 +33,12 @@
         "name": "min_refurbishment_state",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 1
+            "quantative": 1
         },
         "scenarioValue": {
-        "quantative": 1
+            "quantative": 1
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "User setting",
         "category": "ENERGY",
@@ -48,12 +48,12 @@
         "name": "total_pv_production",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -63,12 +63,12 @@
         "name": "total_heat_production",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -78,12 +78,12 @@
         "name": "total_emission",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
@@ -93,12 +93,12 @@
         "name": "self_sufficiency",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
@@ -108,28 +108,27 @@
         "name": "energy_sharing_potential",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
         "subcategory": "kpi"
     },
-
     {
         "name": "total_gas_import",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -139,14 +138,44 @@
         "name": "total_electricity_import",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "imports"
+    },
+    {
+        "name": "reducible_import_kwh",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "Calculation",
+        "category": "ENERGY",
+        "subcategory": "imports"
+    },
+    {
+        "name": "remaining_import_kwh",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "Calculation",
         "category": "ENERGY",
         "subcategory": "imports"
     },
@@ -154,12 +183,12 @@
         "name": "total_electricity_export",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -169,12 +198,12 @@
         "name": "total_gas_cost",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -184,12 +213,12 @@
         "name": "total_electricity_cost",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -199,12 +228,12 @@
         "name": "transformation_cost",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -214,12 +243,42 @@
         "name": "total_gas_heating_costs_om",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_gas_heating_cap_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_gas_heating_cost_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -229,12 +288,72 @@
         "name": "total_ashp_heating_costs_om",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_ashp_heating_cap_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_ashp_heating_cost_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_dh_heating_cap_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_dh_heating_cost_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -244,12 +363,42 @@
         "name": "total_thermal_storage_costs_om",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_thermal_storage_cap_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_thermal_storage_cost_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -259,12 +408,42 @@
         "name": "total_photovoltaic_costs_om",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_photovoltaic_cap_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "costs"
+    },
+    {
+        "name": "total_photovoltaic_cost_invest",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
@@ -274,15 +453,30 @@
         "name": "total_costs_om",
         "scenarioId": "empty",
         "startValue": {
-        "quantative": 0
+            "quantative": 0
         },
         "scenarioValue": {
-        "quantative": 0
+            "quantative": 0
         },
-        "statType": "m2",
+        "statType": "none",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
         "subcategory": "costs"
+    },
+    {
+        "name": "dh_potential_buildings",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "none",
+        "visible": true,
+        "source": "Calculation",
+        "category": "ENERGY",
+        "subcategory": "heat_network"
     }
 ]

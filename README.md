@@ -1,65 +1,63 @@
 # FuBee skripts -- Function Reference
 
-This repo holds the standalone poller scripts that drive FutureBeeing scenario pipelines (refurbishment state, heating technology, energy import, quick stats). Every `*_backend.py` file is the poller-run counterpart of its non-`_backend` sibling: same pipeline, but it reads its API key and script config (JSON files) from the poller's environment and the `/v1/scripts/files` endpoint instead of local files, and is triggered by an event (`event.json`) rather than always picking the newest scenario.
+This documents the poller scripts that actually run in FuBee: `check_stats.py`, `change_refurb_state_backend.py` and `data_import_backend.py`. Each is triggered by a poller event and reads its API key and script config (JSON files) from the poller's environment and the `/v1/scripts/files` endpoint.
+
+**Not covered below** (excluded on purpose, not just missed): `change_refurb_state.py` and `data_import.py` are the local/standalone variants of the two `_backend` scripts above -- same pipeline, but reading config from local files for manual/offline testing; they are not deployed to FuBee. `update_technology.py` has no `_backend` counterpart at all, so it isn't deployed either -- and as documented in its own module docstring, its `process_scenario_changes` currently raises a `NameError` in `update_heat_techs` on every run, so it wouldn't be usable as-is even if deployed. If any of these three get promoted to production, re-run this reference including them.
 
 ## Scripts
 
 | Script | Purpose |
 |---|---|
 | [`check_stats.py`](check_stats.py) | Poller script: on a STATS_UPDATED or MANUAL event, fetches and prints every stats row for the event's scenario. |
-| [`change_refurb_state.py`](change_refurb_state.py) | Standalone/local variant of the refurbishment-state pipeline: for the newest scenario reachable with this API key, lowers building refurbishment states to the scenario's min_refurb_state input, recomputes heating/PV energy statistics via OEP system imports, and publishes the updated building tags, heat-demand legend and energy stats. |
 | [`change_refurb_state_backend.py`](change_refurb_state_backend.py) | Poller-run variant of the refurbishment-state pipeline: on a SCENARIO_CHANGED or MANUAL event, lowers the event's scenario's building refurbishment states to its min_refurb_state input, recomputes heating/PV energy statistics via OEP system imports, and publishes the updated building tags, heat-demand legend and energy stats. |
-| [`update_technology.py`](update_technology.py) | Standalone/local pipeline for updating a scenario's heating-technology mix: for the newest scenario reachable with this API key, applies the configured heat-pump/gas/ district-heat/PV settings, recomputes energy statistics via OEP system imports, and publishes the updated building tags plus the refurbishment-state, heat-technology, heat-demand and electricity-demand legends and energy stats. |
-| [`data_import.py`](data_import.py) | Standalone/local pipeline for importing a brand-new scenario: loads OEP building data (BAG) for the scenario's bounding box, spatially joins it to the scenario's OSM buildings, computes heating/PV energy statistics via OEP system imports, declares the initial scenario inputs, and publishes the building tags, legends (refurbishment state, heating technology, heat/electricity cluster) and energy stats. |
 | [`data_import_backend.py`](data_import_backend.py) | Poller-run variant of the new-scenario import pipeline: on a SCENARIO_CREATED or MANUAL event, loads OEP building data (BAG) for the scenario's bounding box, spatially joins it to the scenario's OSM buildings, computes heating/PV energy statistics via OEP system imports, declares the initial scenario inputs, and publishes the building tags, legends and energy stats. |
 
 See each file's own module docstring (top of the file) for the full pipeline description, config source and trigger event.
 
 ## Function reference
 
-Every function defined across the six scripts, alphabetically. **Used in** lists every script that defines a function of that name; where the implementation (and therefore the docstring) differs between scripts, each variant is shown separately.
+Every function defined across the three deployed scripts, alphabetically. **Used in** lists every one of these scripts that defines a function of that name (a function also present in one of the excluded local/dev scripts is not counted there); where the implementation differs between scripts, each variant is shown separately.
 
 | Function | Used in (n) |
 |---|---|
-| [`_log_step`](#_log_step) | 5 |
-| [`build_building_tags`](#build_building_tags) | 2 |
-| [`build_demand_legend`](#build_demand_legend) | 5 |
-| [`calc_systems`](#calc_systems) | 2 |
-| [`calc_systems_update`](#calc_systems_update) | 3 |
-| [`check_patches`](#check_patches) | 5 |
-| [`check_refurb_state`](#check_refurb_state) | 2 |
-| [`convert_response_data`](#convert_response_data) | 5 |
-| [`create_energy_patches`](#create_energy_patches) | 2 |
-| [`create_init_inputs`](#create_init_inputs) | 2 |
-| [`create_insert_tags`](#create_insert_tags) | 2 |
-| [`create_system_id`](#create_system_id) | 5 |
-| [`declare_inputs`](#declare_inputs) | 2 |
-| [`fetch_buildings`](#fetch_buildings) | 3 |
-| [`fetch_inputs`](#fetch_inputs) | 3 |
-| [`fetch_multiple_system_ids_advanced`](#fetch_multiple_system_ids_advanced) | 5 |
-| [`fetch_scenarios`](#fetch_scenarios) | 4 |
-| [`fetch_stats`](#fetch_stats) | 6 |
-| [`fetch_tagged_buildings`](#fetch_tagged_buildings) | 2 |
-| [`format_like_hstore`](#format_like_hstore) | 5 |
-| [`get_osm_buildings`](#get_osm_buildings) | 2 |
-| [`get_scenario_bbox`](#get_scenario_bbox) | 2 |
-| [`import_oep_bbox_data`](#import_oep_bbox_data) | 2 |
-| [`import_systems`](#import_systems) | 5 |
-| [`patch_system_data`](#patch_system_data) | 5 |
-| [`process_new_scenario`](#process_new_scenario) | 2 |
-| [`process_scenario_changes`](#process_scenario_changes) | 3 |
-| [`publish_energy_stats`](#publish_energy_stats) | 5 |
-| [`publish_legend`](#publish_legend) | 5 |
-| [`sample_colours_from_cmap`](#sample_colours_from_cmap) | 5 |
-| [`update_buildings`](#update_buildings) | 5 |
-| [`update_energy_patches`](#update_energy_patches) | 3 |
-| [`update_heat_techs`](#update_heat_techs) | 1 |
-| [`update_stats`](#update_stats) | 5 |
+| [`_log_step`](#_log_step) | 2 |
+| [`build_building_tags`](#build_building_tags) | 1 |
+| [`build_demand_legend`](#build_demand_legend) | 2 |
+| [`calc_systems`](#calc_systems) | 1 |
+| [`calc_systems_update`](#calc_systems_update) | 1 |
+| [`check_patches`](#check_patches) | 2 |
+| [`check_refurb_state`](#check_refurb_state) | 1 |
+| [`convert_response_data`](#convert_response_data) | 2 |
+| [`create_energy_patches`](#create_energy_patches) | 1 |
+| [`create_init_inputs`](#create_init_inputs) | 1 |
+| [`create_insert_tags`](#create_insert_tags) | 1 |
+| [`create_system_id`](#create_system_id) | 2 |
+| [`declare_inputs`](#declare_inputs) | 1 |
+| [`fetch_buildings`](#fetch_buildings) | 1 |
+| [`fetch_inputs`](#fetch_inputs) | 1 |
+| [`fetch_multiple_system_ids_advanced`](#fetch_multiple_system_ids_advanced) | 2 |
+| [`fetch_scenarios`](#fetch_scenarios) | 1 |
+| [`fetch_stats`](#fetch_stats) | 3 |
+| [`fetch_tagged_buildings`](#fetch_tagged_buildings) | 1 |
+| [`format_like_hstore`](#format_like_hstore) | 2 |
+| [`get_osm_buildings`](#get_osm_buildings) | 1 |
+| [`get_scenario_bbox`](#get_scenario_bbox) | 1 |
+| [`import_oep_bbox_data`](#import_oep_bbox_data) | 1 |
+| [`import_systems`](#import_systems) | 2 |
+| [`patch_system_data`](#patch_system_data) | 2 |
+| [`process_new_scenario`](#process_new_scenario) | 1 |
+| [`process_scenario_changes`](#process_scenario_changes) | 1 |
+| [`publish_energy_stats`](#publish_energy_stats) | 2 |
+| [`publish_legend`](#publish_legend) | 2 |
+| [`sample_colours_from_cmap`](#sample_colours_from_cmap) | 2 |
+| [`update_buildings`](#update_buildings) | 2 |
+| [`update_energy_patches`](#update_energy_patches) | 1 |
+| [`update_stats`](#update_stats) | 2 |
 
 ### `_log_step`
 
 **Signature:** `_log_step(step_name, start_time, **extra_info)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Logs the duration and optional extra info (e.g. row count) for a pipeline step.
@@ -68,7 +66,7 @@ Logs the duration and optional extra info (e.g. row count) for a pipeline step.
 ### `build_building_tags`
 
 **Signature:** `build_building_tags(row)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Builds the tag dict for a single building.
@@ -85,7 +83,7 @@ Returns:
 ### `build_demand_legend`
 
 **Signature:** `build_demand_legend(values, name, unit='kWh/a', n_max_buckets=4, cmap_name='YlOrRd')`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Builds a legend definition from a set of values, either as exact-match buckets or
@@ -108,7 +106,7 @@ Returns:
 ### `calc_systems`
 
 **Signature:** `calc_systems(tagged_features, area)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Computes energy statistics from tagged_features and calls import_systems for the
@@ -137,7 +135,7 @@ Returns:
 ### `calc_systems_update`
 
 **Signature:** `calc_systems_update(tagged_features, area)`  
-**Used in (3):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`
+**Used in (1):** `change_refurb_state_backend.py`
 
 ```text
 Computes energy statistics from tagged_features and calls import_systems for the
@@ -166,7 +164,7 @@ Returns:
 ### `check_patches`
 
 **Signature:** `check_patches(patches, existing_stats)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Splits patches into those that need to be published as new stats and those that
@@ -176,7 +174,7 @@ update an existing one.
 ### `check_refurb_state`
 
 **Signature:** `check_refurb_state(tagged_features, fetched_inputs)`  
-**Used in (2):** `change_refurb_state.py`, `change_refurb_state_backend.py`
+**Used in (1):** `change_refurb_state_backend.py`
 
 ```text
 Lowers each building's refurbishment_state (and the heat_demand/heat_cluster values
@@ -199,7 +197,7 @@ Returns:
 ### `convert_response_data`
 
 **Signature:** `convert_response_data(response, import_column_names)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Converts the raw, column-less OEP rows (lists of values) into a dict of named
@@ -222,7 +220,7 @@ Returns:
 ### `create_energy_patches`
 
 **Signature:** `create_energy_patches(energy_stats, scenario_id)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Builds the patch list for the stats endpoint from the STATS_INIT template and the
@@ -244,7 +242,7 @@ Returns:
 ### `create_init_inputs`
 
 **Signature:** `create_init_inputs(tagged_features)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Builds the initial values for this script's declared scenario inputs from the
@@ -265,7 +263,7 @@ Returns:
 ### `create_insert_tags`
 
 **Signature:** `create_insert_tags(buildings_data, osm_gdf, feature_list)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Spatially joins OEP building data (BAG) to OSM features and builds the resulting
@@ -294,7 +292,7 @@ Returns:
 ### `create_system_id`
 
 **Signature:** `create_system_id(tagged_features, static_cols)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Builds a unique, hyphen-separated system_id for each feature from its static_cols
@@ -312,7 +310,7 @@ Returns:
 ### `declare_inputs`
 
 **Signature:** `declare_inputs(definitions)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Declares (or updates) this script's own user-adjustable scenario inputs - shown as
@@ -333,7 +331,7 @@ card with no header.
 ### `fetch_buildings`
 
 **Signature:** `fetch_buildings(scenario_id)`  
-**Used in (3):** `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Every building/area GeoJSON Feature in the scenario - raw hstore tags are in
@@ -343,7 +341,7 @@ feature["properties"]["tags"], which can be None (not just missing) for features
 ### `fetch_inputs`
 
 **Signature:** `fetch_inputs(scenario_id)`  
-**Used in (3):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`
+**Used in (1):** `change_refurb_state_backend.py`
 
 ```text
 Current value of every input this script has declared, for this scenario - {key: value},
@@ -353,7 +351,7 @@ already falling back to that input's own declared default for anything the user 
 ### `fetch_multiple_system_ids_advanced`
 
 **Signature:** `fetch_multiple_system_ids_advanced(system_ids, url, table_name)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Queries the OEP advanced-search API for every row of a table whose system_id is in
@@ -371,7 +369,7 @@ Returns:
 ### `fetch_scenarios`
 
 **Signature:** `fetch_scenarios()`  
-**Used in (4):** `change_refurb_state.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Every scenario this key's municipalities cover, with id/name/bbox.
@@ -380,7 +378,7 @@ Every scenario this key's municipalities cover, with id/name/bbox.
 ### `fetch_stats`
 
 **Signature:** `fetch_stats(scenario_id)`  
-**Used in (6):** `check_stats.py`, `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (3):** `check_stats.py`, `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Every stats row (including hidden stat_type: 'metadata' legend rows) for the scenario.
@@ -389,7 +387,7 @@ Every stats row (including hidden stat_type: 'metadata' legend rows) for the sce
 ### `fetch_tagged_buildings`
 
 **Signature:** `fetch_tagged_buildings(scenario_id)`  
-**Used in (2):** `change_refurb_state.py`, `change_refurb_state_backend.py`
+**Used in (1):** `change_refurb_state_backend.py`
 
 ```text
 Every building/area GeoJSON Feature in the scenario - raw hstore tags are in
@@ -399,7 +397,7 @@ feature["properties"]["tags"], which can be None (not just missing) for features
 ### `format_like_hstore`
 
 **Signature:** `format_like_hstore(v)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Mirrors how Python floats get serialised when written to hstore -- integer-valued
@@ -409,7 +407,7 @@ floats lose their ".0" suffix, real decimals are kept as-is.
 ### `get_osm_buildings`
 
 **Signature:** `get_osm_buildings(scenario_id)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Loads a scenario's OSM buildings/areas and turns them into a GeoDataFrame.
@@ -428,7 +426,7 @@ Returns:
 ### `get_scenario_bbox`
 
 **Signature:** `get_scenario_bbox()`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Determines the bounding box of the most recently created scenario.
@@ -444,7 +442,7 @@ Returns:
 ### `import_oep_bbox_data`
 
 **Signature:** `import_oep_bbox_data(bbox)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Loads every building from the OEP table supply.nl_mosaiq_phase_1 whose geometry
@@ -465,7 +463,7 @@ Returns:
 ### `import_systems`
 
 **Signature:** `import_systems(case_features, case_name, area)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Imports the matching technical system data from the OEP for one technology/PV case
@@ -490,7 +488,7 @@ Returns:
 ### `patch_system_data`
 
 **Signature:** `patch_system_data(tagged_features, response_data)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Enriches each feature with the technical system data matching its system_id.
@@ -512,7 +510,7 @@ Returns:
 ### `process_new_scenario`
 
 **Signature:** `process_new_scenario(scenario_id)`  
-**Used in (2):** `data_import.py`, `data_import_backend.py`
+**Used in (1):** `data_import_backend.py`
 
 ```text
 Runs the full import/computation/publish pipeline for a new scenario.
@@ -533,33 +531,17 @@ Returns:
 
 ### `process_scenario_changes`
 
-**Used in (3), implementation differs by script:**
+**Signature:** `process_scenario_changes(scenario_id)`  
+**Used in (1):** `change_refurb_state_backend.py`
 
-- `process_scenario_changes(scenario_id)` in `change_refurb_state.py`:
-```text
-Runs the full refurbishment-state pipeline for an existing scenario: fetch tagged
-buildings, stats and inputs -> lower refurbishment states per min_refurb_state ->
-recompute energy statistics and import the matching heating/PV system data -> patch
-the updated building tags -> publish the heat-demand legend -> publish the new/updated
-energy stats.
-
-Reads scenario_id from CLI/local context (this is the standalone/local variant --
-see change_refurb_state_backend.py for the poller-run one).
-
-Args:
-    scenario_id: ID of the scenario to process.
-
-Returns:
-    None. All results are persisted directly via the API endpoints (update_buildings,
-    publish_legend, publish_energy_stats, update_stats).
-```
-- `process_scenario_changes(scenario_id)` in `change_refurb_state_backend.py`:
 ```text
 Runs the full refurbishment-state pipeline for one scenario, triggered by a
 SCENARIO_CHANGED or MANUAL poller event: fetch tagged buildings, stats and inputs ->
 lower refurbishment states per min_refurb_state -> recompute energy statistics and
 import the matching heating/PV system data -> patch the updated building tags ->
-publish the heat-demand legend -> publish the new/updated energy stats.
+publish the heat-demand legend -> publish the new/updated energy stats (also
+resetting the status-quo baseline when the scenario's "set_status_quo" input is
+on -- see update_energy_patches).
 
 Args:
     scenario_id: ID of the scenario to process (from the triggering event's payload).
@@ -568,32 +550,16 @@ Returns:
     None. All results are persisted directly via the API endpoints (update_buildings,
     publish_legend, publish_energy_stats, update_stats).
 ```
-- `process_scenario_changes(scenario_id)` in `update_technology.py`:
-```text
-Runs the full heating-technology pipeline for an existing scenario: fetch tagged
-buildings and stats, apply the (currently hardcoded) heat-pump/gas/district-heat
-technology split, recompute energy statistics and import the matching heating/PV
-system data, patch the updated building tags, publish the refurbishment-state,
-heat-technology, heat-demand and electricity-demand legends, and publish the new/
-updated energy stats.
-
-Args:
-    scenario_id: ID of the scenario to process.
-
-Returns:
-    None. All results are persisted directly via the API endpoints (update_buildings,
-    publish_legend, publish_energy_stats, update_stats).
-```
 
 ### `publish_energy_stats`
 
-**Used in (5), implementation differs by script:**
+**Used in (2), implementation differs by script:**
 
-- `publish_energy_stats(patches)` in `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`:
+- `publish_energy_stats(patches)` in `change_refurb_state_backend.py`:
 ```text
 Publishes a new stat for the energy calculations
 ```
-- `publish_energy_stats(patches)` in `data_import.py`, `data_import_backend.py`:
+- `publish_energy_stats(patches)` in `data_import_backend.py`:
 ```text
 Publishes a new stat for the energy calculations.
 
@@ -609,7 +575,7 @@ Args:
 ### `publish_legend`
 
 **Signature:** `publish_legend(scenario_id, existing_stats, label_key, legend_source)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Publishes or updates the (hidden) legend definition for this scenario.
@@ -618,7 +584,7 @@ Publishes or updates the (hidden) legend definition for this scenario.
 ### `sample_colours_from_cmap`
 
 **Signature:** `sample_colours_from_cmap(cmap_name, n)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 Sample n evenly spaced colours from a Matplotlib colormap.
@@ -634,7 +600,7 @@ Returns:
 ### `update_buildings`
 
 **Signature:** `update_buildings(patches)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 patches: list of {"id": feature_id, "properties": {"tags": {...}}} (or any of the other
@@ -645,53 +611,35 @@ scenario's History tab, same as a person's own edits.
 
 ### `update_energy_patches`
 
-**Signature:** `update_energy_patches(energy_stats, existing_stats)`  
-**Used in (3):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`
+**Signature:** `update_energy_patches(energy_stats, existing_stats, fetched_inputs)`  
+**Used in (1):** `change_refurb_state_backend.py`
 
 ```text
 Writes the computed energy_stats values into the matching existing stat rows.
 
 For every existing stat whose name is also a key in energy_stats, overwrites its
-scenarioValue with the (int-cast) computed value.
+scenarioValue with the (int-cast) computed value. When the scenario's
+"set_status_quo" input is on, statusValue is overwritten with the same value too
+-- i.e. the freshly computed numbers become the new baseline, not just the current
+scenario state. Use this once, right after import, to establish the status-quo
+stats a scenario is later compared against; leave the input off for every regular
+recompute afterwards, or the baseline would keep drifting to match the scenario.
 
 Args:
     energy_stats: Dict {stat_name: value}, as returned by calc_systems_update.
     existing_stats: List of existing stat dicts for the scenario, as returned by
         fetch_stats.
+    fetched_inputs: Dict of this scenario's current input values, as returned by
+        fetch_inputs; must contain "set_status_quo".
 
 Returns:
     The existing_stats list, mutated in place.
 ```
 
-### `update_heat_techs`
-
-**Signature:** `update_heat_techs(tagged_features, existing_stats)`  
-**Used in (1):** `update_technology.py`
-
-```text
-Intended to redistribute buildings across heating technologies according to the
-ashp/gas/district-heat/pv scenario-input settings, then recompute per-technology heat
-demand and PV roof area.
-
-Note: as currently written this function references several local variables
-(pv_potential_total, pv_installed_total, hp_cases, ashp_gas_cases, gas_cases) before
-they are ever assigned. It IS called from process_scenario_changes, so every run of
-this script currently raises a NameError here.
-
-Args:
-    tagged_features: List of GeoJSON features with populated properties.tags.
-    existing_stats: List of existing stat dicts for the scenario, as returned by
-        fetch_stats.
-
-Returns:
-    Tuple (tagged_features, energy_stats) -- as intended; not actually reached in
-    the function's current state.
-```
-
 ### `update_stats`
 
 **Signature:** `update_stats(patches)`  
-**Used in (5):** `change_refurb_state.py`, `change_refurb_state_backend.py`, `update_technology.py`, `data_import.py`, `data_import_backend.py`
+**Used in (2):** `change_refurb_state_backend.py`, `data_import_backend.py`
 
 ```text
 patches: list of {"id": stat_id, ...fields to change} (name/statType/visible/source/

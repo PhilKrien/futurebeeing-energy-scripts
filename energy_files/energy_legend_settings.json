@@ -1,50 +1,51 @@
 {"invisible_fields_oep": {
     "buildings": ["heat_demand_1", "heat_demand_2", "heat_demand_3",
-    "heat_cluster_1", "heat_cluster_2", "heat_cluster_3", "roof_area_south", "roof_area_eastwest", "pv_activated"], 
+    "heat_cluster_1", "heat_cluster_2", "heat_cluster_3", "roof_area_south", "roof_area_eastwest", "pv_activated", "pv_activated_data"], 
     "systems": ["gas_boiler_cap_invest", "gas_boiler_cost_invest", "system_id"]
     }
 ,
   "refurbishment_state": {
     "key": "refurbishment_state",
-    "labels": {
-      "1": "Existing",
-      "2": "Usual refurbishment",
-      "3": "Advanced refurbishment"
-    },
-    "colours": {
-      "1": "#ff0000",
-      "2": "#FFE30F",
-      "3": "#26c40e"
-    },
     "source": {
       "label": "Refurbishment state",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#ff0000"},
-        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#FFE30F"},
-        {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#26c40e"}
+        {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#d41515"},
+        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#E0C918"},
+        {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#20940E"}
       ]
     }
   },
   "tech": {
     "key": "heat_technology",
-    "labels": {
-      "hp": "Air heat pump",
-      "gas": "Gas boiler",
-      "district_heat": "District heat"
-    },
-    "colours": {
-      "hp": "#147004",
-      "gas": "#d20505",
-      "district_heat": "#073392"
-    },
     "source": {
       "label": "Heating technology",
       "category": "ENERGY",
       "buckets": [
         {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#147004"},
         {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#d20505"},
-        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#073392"}
+        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#073392"},
+        {"kind": "match", "match": [["heat_technology", "ashp_gas"]], "label": "ASHP-Gas Hybrid", "colour": "#08B4C0"}
+      ]
+    }
+  },
+  "pv_activated": {
+    "key": "pv_activated",
+    "source": {
+      "label": "PV systems",
+      "category": "ENERGY",
+      "buckets": [
+        {"kind": "match", "match": [["pv_activated", "true"]], "label": "Installed", "colour": "#f7b500"}
+      ]
+    }
+  },
+  "dh_potential": {
+    "key": "dh_potential",
+    "source": {
+      "label": "District heat potentials",
+      "category": "ENERGY",
+      "buckets": [
+        {"kind": "match", "match": [["dh_potential", "true"]], "label": "Potential", "colour": "#a30505"}
       ]
     }
   }

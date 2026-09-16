@@ -66,6 +66,17 @@ INPUT_INIT = resp.json()
 # Building Data fields from the OEP DB that should stay invisible
 INVISIBLE_FIELDS_OEP = LEGEND_SETTINGS["invisible_fields_oep"]
 
+def parse_profile(value):
+    """Normalizes a profile tag value into something np.array(..., dtype=float) accepts.
+
+    The OEP sometimes returns array columns already parsed into a list, and sometimes as
+    a single comma-separated string -- this handles both.
+    """
+    if isinstance(value, str):
+        return value.split(",")
+    return value
+
+
 def sample_colours_from_cmap(cmap_name, n):
     """Sample n evenly spaced colours from a Matplotlib colormap.
 
@@ -87,7 +98,7 @@ def format_like_hstore(v):
         return str(int(v))
     return str(v)
 
-def build_demand_legend(values, name, unit="kWh/a", n_max_buckets=4, cmap_name="YlOrRd"):
+def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=4, cmap_name="YlOrRd"):
     """Builds a legend definition from a set of values, either as exact-match buckets or
     as evenly sized range buckets.
 
@@ -95,14 +106,15 @@ def build_demand_legend(values, name, unit="kWh/a", n_max_buckets=4, cmap_name="
         values: Array (or array-like) of raw values to build the legend from (e.g. all
             heat_cluster or elec_cluster values of a scenario).
         name: Display name of the legend (title-cased and used as "label").
+        key: Legend definition key passed through to declare_legend.
         unit: Unit shown in the bucket labels.
         n_max_buckets: Threshold at or below which exact-match buckets are built instead
             of evenly sized range buckets.
         cmap_name: Name of the Matplotlib colormap used for the bucket colours.
 
     Returns:
-        JSON string with the legend definition (label, category, unit, buckets), or None
-        if no values remain after removing NaNs.
+        Legend definition dict (key, label, category, unit, buckets) ready for
+        declare_legend, or None if no values remain after removing NaNs.
     """
     float_values = values.astype(float)
     clean_values = float_values[~np.isnan(float_values)]
@@ -115,11 +127,19 @@ def build_demand_legend(values, name, unit="kWh/a", n_max_buckets=4, cmap_name="
 
     if n_unique <= n_max_buckets:
         colours = sample_colours_from_cmap(cmap_name, n_unique)
+        # Bucket boundaries meet at the midpoint between neighbouring values instead of a
+        # fixed +/-1 padding, so closely spaced values (e.g. cluster centroids) never
+        # produce overlapping ranges.
+        edges = (
+            [unique_values[0] - 1]
+            + [(unique_values[i] + unique_values[i + 1]) / 2 for i in range(n_unique - 1)]
+            + [unique_values[-1] + 1]
+        )
         buckets = [
             {
                 "kind": "range",
-                "min": unique_values[i] - 1,
-                "max": unique_values[i] + 1,
+                "min": edges[i],
+                "max": edges[i + 1],
                 "label": f"{unique_values[i]:.2f} {unit}",
                 "colour": colours[i],
             }
@@ -145,12 +165,13 @@ def build_demand_legend(values, name, unit="kWh/a", n_max_buckets=4, cmap_name="
             for i in range(k)
         ]
 
-    return json.dumps({
+    return {
+        "key": key,
         "label": f"{name.replace('_', ' ').title()}",
         "category": "ENERGY",
         "unit": unit,
         "buckets": buckets,
-    })
+    }
 
 def fetch_tagged_buildings(scenario_id):
     """Every building/area GeoJSON Feature in the scenario - raw hstore tags are in
@@ -175,7 +196,7 @@ def update_buildings(patches):
 
 
 def fetch_stats(scenario_id):
-    """Every stats row (including hidden stat_type: 'metadata' legend rows) for the scenario."""
+    """Every stats row for the scenario."""
     log.info(f"Fetching stats for scenario {scenario_id}")
     resp = requests.get(f"{API_BASE}/v1/stats", headers=HEADERS, params={"scenarioId": scenario_id})
     resp.raise_for_status()
@@ -184,29 +205,20 @@ def fetch_stats(scenario_id):
     return stats
 
 
-def publish_legend(scenario_id, existing_stats, label_key, legend_source):
-    """Publishes or updates the (hidden) legend definition for this scenario."""
-    existing = next((stat for stat in existing_stats if stat["name"] == label_key), None)
-    
-    if existing:
-        print("new legend:", legend_source)
-        log.info(f"Updating {label_key} legend for scenario {scenario_id}")
-        resp = requests.patch(f"{API_BASE}/v1/stats", headers=HEADERS, json=[
-            {"id": existing["id"], "source": legend_source},
-        ])
-    else:
-        log.info(f"Publishing new {label_key} legend for scenario {scenario_id}")
-        resp = requests.post(f"{API_BASE}/v1/stats", headers=HEADERS, json=[{
-            "name": label_key,
-            "scenarioId": scenario_id,
-            "startValue": {"quantative": 0},
-            "scenarioValue": {"quantative": 0},
-            "statType": "metadata",
-            "visible": False,
-            "source": legend_source,
-        }])
+def declare_legend(definitions):
+    """Declares (or updates) this script's own dynamic map-legend parameters - the colour buckets
+    shown under the legend's Energy / Ecology / Social & Infra tabs. Safe to call every run
+    (upserts by key); a parameter here always belongs to this script alone, and is global to the
+    script (not per-scenario). definitions: list of
+    {"key", "label", "category", "unit" (optional), "subcategory" (optional), "buckets"}
+    where category is one of "ENERGY", "ECOLOGY", "SOCIALINFRA" and buckets is either
+    [{"kind": "range", "min", "max", "label", "colour"}, ...]
+    or [{"kind": "match", "match": [[column, value], ...], "label", "colour"}, ...].
+    unit is free text shown next to the parameter header - omit/None for no unit."""
+    log.info(f"Declaring {len(definitions)} legend parameter definitions")
+    resp = requests.post(f"{API_BASE}/v1/legend/definitions", headers=HEADERS, json={"definitions": definitions})
     resp.raise_for_status()
-    log.info(f"Published {label_key} legend for scenario {scenario_id}")
+    return resp.json()
 
 
 def publish_energy_stats(patches):
@@ -261,7 +273,6 @@ def check_refurb_state(tagged_features, fetched_inputs):
     """
     min_refurb_state = fetched_inputs["min_refurb_state"]
 
-    print("Found state", min_refurb_state, type(min_refurb_state))
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
         if "refurbishment_state" in feature_tags:
@@ -319,12 +330,31 @@ def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
     res = requests.post(
         f"{url}/advanced/search",
         json=query,
-        headers=HEADERS,
     )
     res.raise_for_status()
-    return res.json()["data"]
+    result = res.json()
+
+    rowcount = result.get("content", {}).get("rowcount")
+    if rowcount == 0:
+        return []
+
+    if "data" not in result:
+        raise RuntimeError(
+            f"OEP advanced search for table '{table_name}' returned no 'data' key "
+            f"(rowcount={rowcount}); full response: {result}"
+        )
+
+    return result["data"]
      
      
+# Cluster/measurement static_cols whose OEP system_id segment is always a float string,
+# even when the value is exactly 0. Tags read back from the backend's hstore storage lose
+# the ".0" for whole numbers (see format_like_hstore), so str(feature_tags[col]) alone
+# gives "0" instead of "0.0" for e.g. a building with no south-facing roof, which then
+# never matches the OEP table's system_id. size_class/nearest_city/roof_type are
+# categorical strings and refurbishment_state is a plain int -- left as-is.
+FLOAT_SYSTEM_ID_COLS = {"elec_cluster", "heat_cluster", "roof_cluster_eastwest", "roof_cluster_south"}
+
 # Find and write the necessary system_ids to pull from OEP
 def create_system_id(tagged_features, static_cols):
     """Builds a unique, hyphen-separated system_id for each feature from its static_cols
@@ -343,15 +373,18 @@ def create_system_id(tagged_features, static_cols):
         feature_tags = feature["properties"]["tags"]
         combination = []
         for col in static_cols:
-            combination.append(str(feature_tags[col]))
+            value = feature_tags[col]
+            if col in FLOAT_SYSTEM_ID_COLS:
+                value = float(value)
+            combination.append(str(value))
         combination = "-".join(combination)
         feature_tags["system_id"] = combination
         combinations.add(combination)
     return combinations
-        
+
 
 # Add the downloaded system data to the features tags
-def patch_system_data(tagged_features, response_data):      
+def patch_system_data(tagged_features, response_data):
     """Enriches each feature with the technical system data matching its system_id.
 
     Features whose system_id has no entry in response_data are skipped (logged to the
@@ -364,24 +397,29 @@ def patch_system_data(tagged_features, response_data):
             convert_response_data.
 
     Returns:
-        The tagged_features list, whose tag dicts have been extended in place with the
-        matching system data and the "visible:" flags.
+        The subset of tagged_features whose system_id had a matching OEP entry, with
+        their tag dicts extended in place with the matching system data and the
+        "visible:" flags. Features with no match are dropped, not just left unpatched --
+        callers rely on every returned feature actually carrying the imported fields.
     """
+    patched_features = []
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
         feature_system_id = feature_tags["system_id"]
-        
+
         if feature_system_id not in response_data:
-            print("kein OEP-Eintrag fuer dieses System -- ueberspringen")
+            log.warning(f"No OEP entry for system_id '{feature_system_id}' (feature {feature.get('id')}) -- skipping")
             continue
-        
+
         tech_data = response_data[feature_system_id]
         feature_tags.update(tech_data)
-        
+
         for field in INVISIBLE_FIELDS_OEP["systems"]:
             feature_tags[f"visible:{field}"] = "false"
-            
-    return tagged_features
+
+        patched_features.append(feature)
+
+    return patched_features
 
 
 # Convert the response data to a hashable dict of tags -> system_id: tags
@@ -437,8 +475,7 @@ def import_systems(case_features, case_name, area):
     import_column_names = IMPORT_VARIABLES["column_names"][case_name]
     combinations = create_system_id(case_features, static_cols)
     
-    # table_name = area + f"_{case_name}""
-    table_name = "hoogeveen" + f"_{case_name}"
+    table_name = area + f"_{case_name}"
     
     # Import and merge system data
     response = fetch_multiple_system_ids_advanced(combinations, OEP_BASE_URL, table_name)
@@ -540,13 +577,13 @@ def calc_systems_update(tagged_features, area):
  
     energy_stats["total_heat_demand"] = total_heat_demand
     energy_stats["total_electricity_demand"] = total_electricity_demand
-    energy_stats["pv_setting"] = pv_installed_total / pv_potential_total
+    energy_stats["pv_setting"] = (pv_installed_total / pv_potential_total * 100) if pv_potential_total > 0 else 0.0
  
     # Load the required combinations from the MOSAIQ DB for the HP cases
     if len(hp_cases) > 0:
         hp_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in hp_cases)
         hp_share = hp_heat_demand / total_heat_demand
-        energy_stats["ashp_setting"] = hp_share
+        energy_stats["ashp_setting"] = hp_share * 100
  
         hp_only_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         hp_pv_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "true"]
@@ -557,8 +594,8 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
  
                 # Sums
                 total_heat_produced += float(tags["ashp_production"])
@@ -574,10 +611,10 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
-                summed_pv_production_profiles += np.array(tags["pv_generation_profile"], dtype=float)
-                summed_elec_export_profiles += np.array(tags["electricity_export_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
+                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
+                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
  
                 # Sums
                 total_heat_produced += float(tags["ashp_production"])
@@ -593,7 +630,7 @@ def calc_systems_update(tagged_features, area):
     if len(gas_cases) > 0:
         gas_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in gas_cases)
         gas_share = gas_heat_demand / total_heat_demand
-        energy_stats["gas_setting"] = gas_share
+        energy_stats["gas_setting"] = gas_share * 100
  
         gas_only_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         gas_pv_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
@@ -604,8 +641,8 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
  
                 # Sums
                 # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
@@ -624,10 +661,10 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
-                summed_pv_production_profiles += np.array(tags["pv_generation_profile"], dtype=float)
-                summed_elec_export_profiles += np.array(tags["electricity_export_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
+                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
+                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
  
                 # Sums
                 # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
@@ -648,7 +685,7 @@ def calc_systems_update(tagged_features, area):
     if len(ashp_gas_cases) > 0:
         ashp_gas_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in ashp_gas_cases)
         ashp_gas_share = ashp_gas_heat_demand / total_heat_demand
-        energy_stats["ashp_gas_setting"] = ashp_gas_share
+        energy_stats["ashp_gas_setting"] = ashp_gas_share * 100
  
         ashp_gas_only_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         ashp_gas_pv_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
@@ -659,8 +696,8 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
  
                 # Sums -- ASHP share
                 total_heat_produced += float(tags["ashp_production"])
@@ -685,10 +722,10 @@ def calc_systems_update(tagged_features, area):
                 tags = feature["properties"]["tags"]
  
                 # Profiles
-                summed_elec_import_profiles += np.array(tags["electricity_import_profile"], dtype=float)
-                summed_elec_demand_profiles += np.array(tags["electricity_demand_profile"], dtype=float)
-                summed_pv_production_profiles += np.array(tags["pv_generation_profile"], dtype=float)
-                summed_elec_export_profiles += np.array(tags["electricity_export_profile"], dtype=float)
+                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
+                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
+                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
+                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
  
                 # Sums -- ASHP share
                 total_heat_produced += float(tags["ashp_production"])
@@ -730,13 +767,13 @@ def calc_systems_update(tagged_features, area):
     energy_sharing_potential = reducible_import / total_electricity_import if total_electricity_import > 0 else 0.0
  
     # Electricity stats
-    energy_stats["self_sufficiency"] = self_sufficiency
+    energy_stats["self_sufficiency"] = self_sufficiency * 100
     energy_stats["total_electricity_import"] = total_electricity_import
     energy_stats["total_electricity_export"] = total_electricity_export
     energy_stats["total_electricity_cost"] = total_electricity_cost
     energy_stats["reducible_import_kwh"] = reducible_import
     energy_stats["remaining_import_kwh"] = remaining_import
-    energy_stats["energy_sharing_potential"] = energy_sharing_potential
+    energy_stats["energy_sharing_potential"] = energy_sharing_potential * 100
  
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
@@ -762,7 +799,7 @@ def calc_systems_update(tagged_features, area):
     return energy_stats, tagged_features
 
 
-def update_energy_patches(energy_stats, existing_stats):
+def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
     For every existing stat whose name is also a key in energy_stats, overwrites its
@@ -776,12 +813,89 @@ def update_energy_patches(energy_stats, existing_stats):
     Returns:
         The existing_stats list, mutated in place.
     """
+    set_status_quo = fetched_inputs["set_status_quo"]
+
     for energy_stat in existing_stats:
         name = energy_stat["name"]
         if name in energy_stats:
-            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+            if set_status_quo:
+                energy_stat["startValue"]["quantative"] = int(energy_stats[name])
+                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+            else:
+                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
 
     return existing_stats
+
+
+def declare_inputs(definitions):
+    """Declares (or updates) this script's own user-adjustable scenario inputs - shown as
+    sliders/toggles in the scenario editor's Inputs tab, grouped by category. Safe to call every
+    run (upserts by key); a definition here always belongs to this script alone, another script's
+    definitions are never affected. definitions: list of either
+    {"key", "label", "category", "type": "slider", "min", "max", "default",
+     "step" (optional, default 1), "unit" (optional), "subcategory" (optional)}
+    or {"key", "label", "category", "type": "toggle", "default": True/False,
+        "unit" (optional), "subcategory" (optional)}.
+    category is one of "GENERAL", "ENERGY", "ECOLOGY", "SOCIALINFRA". unit is free text
+    (e.g. "kWh", "m2", "€") shown next to the value - omit/None for no unit. subcategory groups
+    inputs under their own header within a category tab (e.g. multiple inputs sharing
+    subcategory="Heating" show together under a "HEATING" header) - omit/None for a standalone
+    card with no header."""
+    log.info(f"Declaring {len(definitions)} scenario input definitions")
+    resp = requests.post(f"{API_BASE}/v1/scenario-inputs/definitions", headers=HEADERS, json={"definitions": definitions})
+    resp.raise_for_status()
+
+
+def create_init_inputs(tagged_features):
+    """Builds the initial values for this script's declared scenario inputs from the
+    imported buildings.
+
+    For inputs listed under INPUT_INIT["inputs_to_adapt"]["categories"], sets default/max
+    to the count of buildings whose heat_technology matches that category; for inputs
+    listed under ["bools"], sets default/max to the count of buildings where that tag is
+    True. Every other input is passed through unchanged.
+
+    Args:
+        tagged_features: List of GeoJSON features with populated properties.tags.
+
+    Returns:
+        List of input definition dicts, ready to pass to declare_inputs.
+    """
+    input_patches = []
+    num_tagged_features = len(tagged_features)
+    
+    inputs_to_adapt = INPUT_INIT["inputs_to_adapt"]
+    inputs = INPUT_INIT["inputs"]
+    
+    for input in inputs:
+        input_key = input["key"]
+        if input_key in inputs_to_adapt["categories"]:
+            if "min" in inputs_to_adapt["categories"][input_key]:
+                input_min = len([feature for feature in tagged_features if feature["properties"]["tags"]["heat_technology"] == inputs_to_adapt["categories"][input_key]["min"]])
+                input["min"] = input_min
+
+            if "default" in inputs_to_adapt["categories"][input_key]:
+                input_default = len([feature for feature in tagged_features if feature["properties"]["tags"]["heat_technology"] == inputs_to_adapt["categories"][input_key]["default"]])
+                input["default"] = input_default
+
+            input["max"] = num_tagged_features
+            input_patches.append(input)
+
+        elif input_key in inputs_to_adapt["bools"]:
+            if "min" in inputs_to_adapt["bools"][input_key]:
+                input_min = len([feature for feature in tagged_features if feature["properties"]["tags"][inputs_to_adapt["bools"][input_key]["min"]] == True])
+                input["min"] = input_min
+
+            if "default" in inputs_to_adapt["bools"][input_key]:
+                input_default = len([feature for feature in tagged_features if feature["properties"]["tags"][inputs_to_adapt["bools"][input_key]["default"]] == True])
+                input["default"] = input_default
+        
+            input["max"] = num_tagged_features
+            input_patches.append(input)
+        else: 
+            input_patches.append(input)
+
+    return input_patches
 
 
 def check_patches(patches, existing_stats):
@@ -815,14 +929,16 @@ def process_scenario_changes(scenario_id):
     SCENARIO_CHANGED or MANUAL poller event: fetch tagged buildings, stats and inputs ->
     lower refurbishment states per min_refurb_state -> recompute energy statistics and
     import the matching heating/PV system data -> patch the updated building tags ->
-    publish the heat-demand legend -> publish the new/updated energy stats.
+    publish the heat-demand legend -> publish the new/updated energy stats (also
+    resetting the status-quo baseline when the scenario's "set_status_quo" input is
+    on -- see update_energy_patches).
 
     Args:
         scenario_id: ID of the scenario to process (from the triggering event's payload).
 
     Returns:
         None. All results are persisted directly via the API endpoints (update_buildings,
-        publish_legend, publish_energy_stats, update_stats).
+        declare_legend, publish_energy_stats, update_stats).
     """
     pipeline_start = time.perf_counter()
     log.info(f"=== Starting pipeline for scenario {scenario_id} ===")
@@ -838,6 +954,11 @@ def process_scenario_changes(scenario_id):
     # 5. This is where the technologies would need to be imported from the OEP and matched to the buildings
     energy_stats, tagged_features = calc_systems_update(tagged_features, "nl")
 
+    # calc_systems_update never touches this key itself; without it the
+    # "min_refurbishment_state" stat stays frozen at its initial value and never
+    # reflects the min_refurb_state slider (see update_energy_patches below).
+    energy_stats["min_refurbishment_state"] = fetched_inputs["min_refurb_state"]
+
     if not tagged_features:
         log.warning(f"No patches produced for scenario {scenario_id} -- skipping update_buildings")
     else:
@@ -847,21 +968,24 @@ def process_scenario_changes(scenario_id):
         _log_step("update_buildings", t0, n_patches=len(tagged_features))
 
 
-    # 7. Publish legend (if not already present)
+    # 7. Declare legend (upserts by key)
     t0 = time.perf_counter()
-    
-    # Update the heat demand legend
+
+    # Heat demand legend
     heat_demand = np.array([feature["properties"]["tags"]["heat_cluster"] for feature in tagged_features])
-    heat_demand_legend = build_demand_legend(heat_demand, "Heat demand")
-    print(heat_demand_legend)
+    heat_demand_legend = build_demand_legend(heat_demand, "Heat demand", "heat_cluster")
     if heat_demand_legend is not None:
-        publish_legend(scenario_id, existing_stats, "heat_cluster", heat_demand_legend)
+        declare_legend([heat_demand_legend])
 
-    _log_step("publish_legend", t0)
+    _log_step("declare_legend", t0)
 
     t0 = time.perf_counter()
 
-    patches = update_energy_patches(energy_stats, existing_stats)
+    # Update the inputs
+    init_inputs = create_init_inputs(tagged_features)
+    declare_inputs(init_inputs)
+
+    patches = update_energy_patches(energy_stats, existing_stats, fetched_inputs)
 
     stats_to_publish, stats_to_patch = check_patches(patches, existing_stats)
 

@@ -71,4 +71,4 @@ if __name__ == "__main__":
 
     
     stats = fetch_stats(scenario_id)
-    print(stats)
+
