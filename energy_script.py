@@ -947,7 +947,7 @@ def calc_heatline_density(line_gdf, tagged_features, case):
 
     # Tag each building with the base_heatline density of its nearest pipe
     for feature, pipe_idx in zip(tagged_features, feature_pipe_idx):
-        if heat_line_dict[pipe_idx]["base_heatline"] > 2000:
+        if heat_line_dict[pipe_idx]["base_heatline"] > 1500:
             feature["properties"]["tags"]["dh_potential"] = "true"
         else:
             feature["properties"]["tags"]["dh_potential"] = "false"
