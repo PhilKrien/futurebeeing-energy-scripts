@@ -273,20 +273,27 @@ def check_refurb_state(tagged_features, fetched_inputs):
     """
     min_refurb_state = fetched_inputs["min_refurb_state"]
 
+    def set_refurb_state(feature_tags, refurb_state_to_set):
+        # New buildings dont have a second refurb_state
+        feature_period = feature_tags["tabula_key"].split(".")[-1]
+        if refurb_state_to_set == 2 and feature_period == "06":
+            refurb_state_to_set = 3
+
+        feature_tags["refurbishment_state"] = refurb_state_to_set
+        feature_tags["heat_demand"] = feature_tags[f"heat_demand_{refurb_state_to_set}"]
+        feature_tags["heat_cluster"] = feature_tags[f"heat_cluster_{refurb_state_to_set}"]
+
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
         if "refurbishment_state" in feature_tags:
-            if int(feature_tags["refurbishment_state_data"]) <= min_refurb_state:
-                # New buildings dont have a second refurb_state
-                feature_period = feature_tags["tabula_key"].split(".")[-1]
-                if min_refurb_state == 2 and feature_period == "06":
-                    refurb_state_to_set = 3
+            if int(feature_tags["refurbishment_state"]) > min_refurb_state:
+                if int(feature_tags["refurbishment_state_data"]) > min_refurb_state:
+                    set_refurb_state(feature_tags, int(feature_tags["refurbishment_state_data"]))
                 else:
-                    refurb_state_to_set = min_refurb_state
-                    
-                feature_tags["refurbishment_state"] = refurb_state_to_set
-                feature_tags["heat_demand"] = feature_tags[f"heat_demand_{refurb_state_to_set}"]
-                feature_tags["heat_cluster"] = feature_tags[f"heat_cluster_{refurb_state_to_set}"]
+                    set_refurb_state(feature_tags, min_refurb_state)
+
+            elif int(feature_tags["refurbishment_state"]) < min_refurb_state:
+                set_refurb_state(feature_tags, min_refurb_state)
 
     return tagged_features
                  
@@ -778,7 +785,8 @@ def calc_systems_update(tagged_features, area):
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
     energy_stats["total_heat_production"] = total_heat_produced
-    energy_stats["total_emission"] = total_emission
+    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
+    energy_stats["total_emission"] = total_emission / 1_000_000
  
     # Operation & maintenance costs, per technology and combined
     energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om

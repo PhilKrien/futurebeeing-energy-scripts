@@ -796,7 +796,8 @@ def calc_systems_update(tagged_features, area):
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
     energy_stats["total_heat_production"] = total_heat_produced
-    energy_stats["total_emission"] = total_emission
+    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
+    energy_stats["total_emission"] = total_emission / 1_000_000
  
     # Operation & maintenance costs, per technology and combined
     energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om

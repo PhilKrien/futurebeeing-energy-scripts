@@ -15,7 +15,7 @@ import logging
 import requests
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import shape, Polygon, LineString
+from shapely.geometry import shape, Polygon
 import numpy as np
 import matplotlib as mpl
 import matplotlib.colors as mcolors
@@ -149,7 +149,7 @@ def fetch_features(scenario_id):
             or "ref:bag" in feature["properties"]["tags"]
         ):
             building_features.append(feature)
-        elif feature["geometry"]["type"] == "LineString" and feature["properties"]["highway"] in ["secondary", "tertiary", "residential"]:
+        elif feature["geometry"]["type"] in ["LineString", "MultiLineString"] and feature["properties"]["highway"] in ["secondary", "tertiary", "residential", "unclassified", "service"]:
             line_features.append(feature)
     log.info(f"Kept {len(building_features)} features with polygons.")
     
@@ -243,6 +243,28 @@ def fetch_inputs(scenario_id):
 # API-Endpunkte: OpenEnergyPlatform (OEP)
 #----------------------------------------------------------------------------
 
+def _post_oep_advanced_search(query, max_attempts=3):
+    """POSTs an OEP /advanced/search query, retrying on failure.
+
+    The endpoint intermittently answers a fraction of otherwise-identical, valid
+    requests with 400 {"reason": "Invalid request"} -- confirmed to be unrelated to
+    query content (reproduced with a trivial dummy query against multiple tables).
+    Retries paper over that flakiness instead of failing the whole pipeline run.
+    """
+    last_response = None
+    for attempt in range(1, max_attempts + 1):
+        response = requests.post(f"{OEP_BASE_URL}/advanced/search", headers=OEP_HEADERS, json=query)
+        if response.ok:
+            return response
+        last_response = response
+        log.warning(
+            f"OEP advanced search failed (attempt {attempt}/{max_attempts}): "
+            f"{response.status_code} {response.text[:500]}"
+        )
+    last_response.raise_for_status()
+    return last_response
+
+
 def import_oep_bbox_data(bbox):
     """Loads every building from the OEP table supply.nl_mosaiq_phase_1 whose geometry
     intersects the given bounding box.
@@ -298,13 +320,8 @@ def import_oep_bbox_data(bbox):
         }
     }
 
-    response = requests.post(
-        "https://openenergyplatform.org/api/v0/advanced/search",
-        headers=OEP_HEADERS,
-        json=query,
-    )
-    response.raise_for_status()
-    
+    response = _post_oep_advanced_search(query)
+
     result = response.json()
     # Response format per OEP docs: {"data": [[row1_col1, ...], [row2_col1, ...], ...]}
     buildings = pd.DataFrame(result["data"], columns=COLUMNS + ["geojson"])
@@ -328,13 +345,12 @@ def import_oep_bbox_data(bbox):
 
     return buildings_data
 
-def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
+def fetch_multiple_system_ids_advanced(system_ids, table_name):
     """Queries the OEP advanced-search API for every row of a table whose system_id is in
     the given set (system_id = sid1 OR system_id = sid2 OR ...).
 
     Args:
         system_ids: Iterable of system_id strings to search for.
-        url: Base URL of the OEP API (e.g. OEP_BASE_URL); "/advanced/search" is appended.
         table_name: Name of the target table on the OEP (e.g. "hoogeveen_gas_only").
 
     Returns:
@@ -363,12 +379,7 @@ def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
         }
     }
 
-    res = requests.post(
-        f"{url}/advanced/search",
-        json=query,
-        headers=OEP_HEADERS,
-    )
-    res.raise_for_status()
+    res = _post_oep_advanced_search(query)
     result = res.json()
 
     rowcount = result.get("content", {}).get("rowcount")
@@ -685,7 +696,7 @@ def import_systems(case_features, case_name, country):
     table_name = country + f"_{case_name}"
     
     # Import and merge system data
-    response = fetch_multiple_system_ids_advanced(combinations, OEP_BASE_URL, table_name)
+    response = fetch_multiple_system_ids_advanced(combinations, table_name)
     response_data = convert_response_data(response, import_column_names)
 
     # Patch the tags with the system data
@@ -758,11 +769,11 @@ def get_osm_features(scenario_id):
 
     if line_features:
         line_gdf = gpd.GeoDataFrame.from_dict(line_features)
-        line_gdf["geometry"] = line_gdf["geometry"].apply(lambda g: LineString(g["coordinates"]))
+        line_gdf["geometry"] = line_gdf["geometry"].apply(shape)
         line_gdf.set_geometry("geometry", inplace=True)
         line_gdf.set_crs("EPSG:4326", inplace=True)
     else:
-        log.warning("No line features (highway in secondary/tertiary/residential) found -- skipping heat network gdf")
+        log.warning("No line features (highway in secondary/tertiary/residential/unclassified) found -- skipping heat network gdf")
         line_gdf = None
 
     return building_gdf, line_gdf, building_features, line_features
@@ -1258,7 +1269,8 @@ def calc_systems(tagged_features, country):
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
     energy_stats["total_heat_production"] = total_heat_produced
-    energy_stats["total_emission"] = total_emission
+    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
+    energy_stats["total_emission"] = total_emission / 1_000_000
  
     # Operation & maintenance costs, per technology and combined
     energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om
@@ -2033,7 +2045,8 @@ def calc_systems_update(tagged_features, country):
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
     energy_stats["total_heat_production"] = total_heat_produced
-    energy_stats["total_emission"] = total_emission
+    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
+    energy_stats["total_emission"] = total_emission / 1_000_000
 
     # Operation & maintenance costs, per technology and combined
     energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om

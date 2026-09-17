@@ -15,7 +15,7 @@ import logging
 import requests
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import shape, LineString
+from shapely.geometry import shape
 import numpy as np
 import matplotlib as mpl
 import matplotlib.colors as mcolors
@@ -302,7 +302,7 @@ def fetch_features(scenario_id):
             or "ref:bag" in feature["properties"]["tags"]
         ):
             building_features.append(feature)
-        elif feature["geometry"]["type"] == "LineString" and feature["properties"]["highway"] in ["secondary", "tertiary", "residential"]:
+        elif feature["geometry"]["type"] in ["LineString", "MultiLineString"] and feature["properties"]["highway"] in ["secondary", "tertiary", "residential", "unclassified", "service"]:
             line_features.append(feature)
     log.info(f"Kept {len(building_features)} features with polygons.")
     log.info(f"Kept {len(line_features)} features with linestrings.")
@@ -539,11 +539,11 @@ def get_osm_features(scenario_id):
 
     if line_features:
         line_gdf = gpd.GeoDataFrame.from_dict(line_features)
-        line_gdf["geometry"] = line_gdf["geometry"].apply(lambda g: LineString(g["coordinates"]))
+        line_gdf["geometry"] = line_gdf["geometry"].apply(shape)
         line_gdf.set_geometry("geometry", inplace=True)
         line_gdf.set_crs("EPSG:4326", inplace=True)
     else:
-        log.warning("No line features (highway in secondary/tertiary/residential) found -- skipping heat network gdf")
+        log.warning("No line features (highway in secondary/tertiary/residential/unclassified) found -- skipping heat network gdf")
         line_gdf = None
 
     return building_gdf, line_gdf, building_features, line_features
@@ -1215,7 +1215,8 @@ def calc_systems(tagged_features, energy_stats, area):
     # Production & emissions (combined across all technologies)
     energy_stats["total_pv_production"] = total_photovoltaic_production
     energy_stats["total_heat_production"] = total_heat_produced
-    energy_stats["total_emission"] = total_emission
+    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
+    energy_stats["total_emission"] = total_emission / 1_000_000
  
     # Operation & maintenance costs, per technology and combined
     energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om
