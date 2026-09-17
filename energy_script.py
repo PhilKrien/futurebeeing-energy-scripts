@@ -21,7 +21,7 @@ import matplotlib as mpl
 import matplotlib.colors as mcolors
 import time
 
-API_BASE = os.environ.get("FUTUREBEEING_API_BASE", "https://<your-domain>")
+API_BASE = os.environ.get("API_BASE_URL", "https://<your-domain>")
 # The poller sets FUTUREBEEING_API_KEY automatically for every run - only set it yourself if you're
 # running this script outside the poller (e.g. testing locally). Never hardcode it here.
 API_KEY = os.environ["FUTUREBEEING_API_KEY"]

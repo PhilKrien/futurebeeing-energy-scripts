@@ -83,7 +83,7 @@
         "scenarioValue": {
             "quantative": 0
         },
-        "statType": "tCO2_per_a",
+        "statType": "gCO2_per_a",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
