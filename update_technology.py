@@ -948,7 +948,7 @@ def calc_systems_update(tagged_features, area):
     return energy_stats, tagged_features
 
 
-def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
+def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
     For every existing stat whose name is also a key in energy_stats, overwrites its
@@ -962,16 +962,10 @@ def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
     Returns:
         The existing_stats list, mutated in place.
     """
-    set_status_quo = fetched_inputs["set_status_quo"]
-
     for energy_stat in existing_stats:
         name = energy_stat["name"]
         if name in energy_stats:
-            if set_status_quo:
-                energy_stat["startValue"]["quantative"] = int(energy_stats[name])
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
-            else:
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
 
     return existing_stats
 
@@ -1068,7 +1062,7 @@ def process_scenario_changes(scenario_id):
 
     t0 = time.perf_counter()
 
-    patches = update_energy_patches(energy_stats, existing_stats, fetched_inputs)
+    patches = update_energy_patches(energy_stats, existing_stats)
 
     stats_to_publish, stats_to_patch = check_patches(patches, existing_stats)
 

@@ -2065,7 +2065,7 @@ def calc_systems_update(tagged_features, country):
 
     return energy_stats, tagged_features
 
-def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
+def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
     For every existing stat whose name is also a key in energy_stats, overwrites its
@@ -2079,16 +2079,10 @@ def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
     Returns:
         The existing_stats list, mutated in place.
     """
-    set_status_quo = fetched_inputs["set_status_quo"]
-
     for energy_stat in existing_stats:
         name = energy_stat["name"]
         if name in energy_stats:
-            if set_status_quo:
-                energy_stat["startValue"]["quantative"] = int(energy_stats[name])
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
-            else:
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
 
     return existing_stats
 
@@ -2099,9 +2093,7 @@ def process_scenario_changes(scenario_id, country):
     density and each building's district-heating potential from the updated heat demand ->
     recompute energy statistics and import the matching heating/PV system data -> patch
     the updated building and line tags -> publish the heat-demand and heat-line-density
-    legends -> publish the new/updated energy stats (also resetting the status-quo
-    baseline when the scenario's "set_status_quo" input is on -- see
-    update_energy_patches).
+    legends -> publish the new/updated energy stats.
 
     Args:
         scenario_id: ID of the scenario to process (from the triggering event's payload).
@@ -2177,7 +2169,7 @@ def process_scenario_changes(scenario_id, country):
 
     t0 = time.perf_counter()
 
-    patches = update_energy_patches(energy_stats, existing_stats, fetched_inputs)
+    patches = update_energy_patches(energy_stats, existing_stats)
 
     stats_to_publish, stats_to_patch = check_patches(patches, existing_stats)
 

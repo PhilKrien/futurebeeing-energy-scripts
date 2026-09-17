@@ -817,7 +817,7 @@ def calc_systems_update(tagged_features, area):
     return energy_stats, tagged_features
 
 
-def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
+def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
     For every existing stat whose name is also a key in energy_stats, overwrites its
@@ -831,16 +831,10 @@ def update_energy_patches(energy_stats, existing_stats, fetched_inputs):
     Returns:
         The existing_stats list, mutated in place.
     """
-    set_status_quo = fetched_inputs["set_status_quo"]
-
     for energy_stat in existing_stats:
         name = energy_stat["name"]
         if name in energy_stats:
-            if set_status_quo:
-                energy_stat["startValue"]["quantative"] = int(energy_stats[name])
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
-            else:
-                energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
 
     return existing_stats
 
@@ -914,16 +908,6 @@ def create_init_inputs(tagged_features):
             input_patches.append(input)
 
     return input_patches
-
-
-# Reset the set_status_quo button after the script ran
-def reset_status_quo_toggle(init_inputs):
-    for input in init_inputs:
-        if input["key"] == "set_status_quo":
-            input["default"] = False 
-
-    return init_inputs
-
 
 
 def check_patches(patches, existing_stats):
@@ -1018,11 +1002,9 @@ def process_scenario_changes(scenario_id):
     # Update the inputs
     init_inputs = create_init_inputs(tagged_features)
 
-    init_inputs = reset_status_quo_toggle(init_inputs)
-
     declare_inputs(init_inputs)
 
-    patches = update_energy_patches(energy_stats, existing_stats, fetched_inputs)
+    patches = update_energy_patches(energy_stats, existing_stats)
 
     stats_to_publish, stats_to_patch = check_patches(patches, existing_stats)
 
