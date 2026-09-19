@@ -345,16 +345,25 @@ def import_oep_bbox_data(bbox):
 
     return buildings_data
 
-def fetch_multiple_system_ids_advanced(system_ids, table_name):
+def fetch_multiple_system_ids_advanced(system_ids, table_name, column_names):
     """Queries the OEP advanced-search API for every row of a table whose system_id is in
-    the given set (system_id = sid1 OR system_id = sid2 OR ...).
+    the given set (system_id = sid1 OR system_id = sid2 OR ...), restricted to the given
+    columns.
 
     Args:
         system_ids: Iterable of system_id strings to search for.
         table_name: Name of the target table on the OEP (e.g. "hoogeveen_gas_only").
+        column_names: Ordered list of column names to request (typically
+            IMPORT_VARIABLES["column_names"][case_name]) -- only these columns are
+            fetched, not every column of the table.
 
     Returns:
-        List of raw data rows (result["data"]) from the OEP response.
+        Tuple (rows, column_names): rows is the list of raw data rows (result["data"])
+        from the OEP response; column_names is the table's actual column names, in the
+        same order as each row's values, taken from the query's own live
+        content.description (a psycopg2-style cursor description) rather than any
+        separately maintained config -- the query has no explicit "fields" list, so the
+        row layout depends entirely on the live table schema, which drifts over time.
     """
     or_conditions = [
         {
@@ -370,6 +379,7 @@ def fetch_multiple_system_ids_advanced(system_ids, table_name):
 
     query = {
         "query": {
+            "fields": [{"type": "column", "column": col} for col in column_names],
             "from": {"type": "table", "table": table_name},
             "where": {
                 "type": "operator",
@@ -382,9 +392,11 @@ def fetch_multiple_system_ids_advanced(system_ids, table_name):
     res = _post_oep_advanced_search(query)
     result = res.json()
 
+    column_names = [col[0] for col in result.get("content", {}).get("description", [])]
+
     rowcount = result.get("content", {}).get("rowcount")
     if rowcount == 0:
-        return []
+        return [], column_names
 
     if "data" not in result:
         raise RuntimeError(
@@ -392,7 +404,7 @@ def fetch_multiple_system_ids_advanced(system_ids, table_name):
             f"(rowcount={rowcount}); full response: {result}"
         )
 
-    return result["data"]
+    return result["data"], column_names
 
 #----------------------------------------------------------------------------
 # Allgemeine Funktionen (Utilities & von beiden Pipelines genutzt)
@@ -446,7 +458,7 @@ def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=4, cmap_n
         log.warning(f"No values available to build '{name}' legend -- skipping")
         return None
 
-    if n_unique <= n_max_buckets:
+    if n_unique < n_max_buckets:
         colours = sample_colours_from_cmap(cmap_name, n_unique)
         # Bucket boundaries meet at the midpoint between neighbouring values instead of a
         # fixed +/-1 padding, so closely spaced values (e.g. cluster centroids) never
@@ -593,8 +605,9 @@ def create_system_id(tagged_features, static_cols):
         combinations.add(combination)
     return combinations
 
-def patch_system_data(tagged_features, response_data):
-    """Enriches each feature with the technical system data matching its system_id.
+def patch_system_data(tagged_features, response_data, summed_values):
+    """Enriches each feature with the technical system data matching its system_id, and
+    accumulates the technical values into summed_values in place.
 
     Features whose system_id has no entry in response_data are skipped (logged to the
     console, without aborting).
@@ -604,6 +617,8 @@ def patch_system_data(tagged_features, response_data):
             create_system_id).
         response_data: Dict {system_id: {column: value, ...}}, as returned by
             convert_response_data.
+        summed_values: Dict of running scenario totals (see calc_systems), mutated in
+            place with every feature's contribution.
 
     Returns:
         The subset of tagged_features whose system_id had a matching OEP entry, with
@@ -621,11 +636,40 @@ def patch_system_data(tagged_features, response_data):
             continue
 
         tech_data = response_data[feature_system_id]
-        feature_tags.update(tech_data)
+        tag_techs = {}
+        for attribute, value in tech_data.items():
+            if isinstance(value, list):
+                if f"summed_{attribute}" in summed_values:
+                    summed_values[f"summed_{attribute}"] += np.array(parse_profile(value), dtype=float)
+
+            else:
+                value_name = f"total_{attribute}"
+                if value_name in summed_values:
+                    # Costs should only be applied, when the heat_technology is transformed. Status quo can't cost anything.
+                    # "heat_technology_data == gas" allein reicht nicht: ein unveraendertes Gas-Gebaeude hat
+                    # heat_technology_data == heat_technology == "gas" auch. Nur anrechnen, wenn sich die Technik
+                    # tatsaechlich unterscheidet (gas -> hp/ashp_gas/district_heat). Bei ashp_gas (Hybrid) wird
+                    # auch die neue Gaskomponente mit angerechnet.
+                    if attribute == "ashp_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                            summed_values[value_name] += value
+                    elif attribute == "gas_heating_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                            summed_values[value_name] += value
+                    elif attribute == "hn_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                            summed_values[value_name] += value
+                    else:
+                        summed_values[value_name] += value
+                
+                tag_techs[attribute] = value
+
+        feature_tags.update(tag_techs)
 
         # The OEP only stores photovoltaic cap_invest/cost_invest/costs_om/cost_periodical
         # split by roof orientation (south/east/west) -- add the combined total here so it's
-        # available under the same key naming as the already-combined production/profits.
+        # available under the same key naming as the already-combined production/profits,
+        # and feed that combined total into summed_values same as the other technologies.
         for pv_metric in ["cap_invest", "cost_invest", "costs_om", "cost_periodical"]:
             south_key = f"photovoltaic_south_{pv_metric}"
             if south_key in feature_tags:
@@ -634,6 +678,9 @@ def patch_system_data(tagged_features, response_data):
                     + float(feature_tags[f"photovoltaic_east_{pv_metric}"])
                     + float(feature_tags[f"photovoltaic_west_{pv_metric}"])
                 )
+                total_key = f"total_photovoltaic_{pv_metric}"
+                if total_key in summed_values:
+                    summed_values[total_key] += feature_tags[f"photovoltaic_{pv_metric}"]
 
         for field in INVISIBLE_FIELDS_OEP["systems"]:
             feature_tags[f"visible:{field}"] = "false"
@@ -642,7 +689,7 @@ def patch_system_data(tagged_features, response_data):
 
     return patched_features
 
-def convert_response_data(response, import_column_names):
+def convert_response_data(response, column_names):
     """Converts the raw, column-less OEP rows (lists of values) into a dict of named
     columns per system_id.
 
@@ -652,15 +699,17 @@ def convert_response_data(response, import_column_names):
     Args:
         response: List of raw data rows (lists), as returned by
             fetch_multiple_system_ids_advanced.
-        import_column_names: Full column name list of the source table (including id and
-            system_id at position 0/1); only the part from index 2 onward is used for
+        column_names: Full column name list of the source table (including id and
+            system_id at position 0/1), in the same order as each row's values -- the
+            live column_names returned by fetch_multiple_system_ids_advanced, not a
+            separately maintained config. Only the part from index 2 onward is used for
             the mapping.
 
     Returns:
         Dict {system_id: {column_name: value, ...}} for fast lookup in patch_system_data.
     """
     response_data = {}
-    data_column_names = import_column_names[2:]
+    data_column_names = column_names[2:]
     for row in response: 
         row_system_id = row[1]
         data_columns = row[2:]
@@ -670,7 +719,8 @@ def convert_response_data(response, import_column_names):
         response_data[row_system_id] = system_data
     return response_data
 
-def import_systems(case_features, case_name, country):
+
+def import_systems(case_features, summed_values, case_name, country):
     """Imports the matching technical system data from the OEP for one technology/PV case
     group (e.g. "gas_only", "hp_pv") and patches it into the corresponding features.
 
@@ -687,21 +737,22 @@ def import_systems(case_features, case_name, country):
 
     Returns:
         The subset of case_features that had a matching OEP entry, with their tag dicts
-        extended with the matching system data (see patch_system_data).
+        extended with the matching system data (see patch_system_data). summed_values is
+        mutated in place with this case group's contribution -- there's nothing to return.
     """
     static_cols = IMPORT_VARIABLES["static_cols"][case_name]
     import_column_names = IMPORT_VARIABLES["column_names"][case_name]
     combinations = create_system_id(case_features, static_cols)
-    
+
     table_name = country + f"_{case_name}"
-    
+
     # Import and merge system data
-    response = fetch_multiple_system_ids_advanced(combinations, table_name)
-    response_data = convert_response_data(response, import_column_names)
+    response, column_names = fetch_multiple_system_ids_advanced(combinations, table_name, import_column_names)
+    response_data = convert_response_data(response, column_names)
 
     # Patch the tags with the system data
-    case_features = patch_system_data(case_features, response_data)
-    
+    case_features = patch_system_data(case_features, response_data, summed_values)
+
     return case_features
 
 
@@ -993,301 +1044,224 @@ def calc_systems(tagged_features, country):
     """Computes energy statistics from tagged_features and calls import_systems for the
     required heating/PV combinations.
 
-    Splits the features by heat_technology ("hp", "gas"/"district_heat", "ashp_gas") and
-    then by pv_activated into up to six case groups, imports the matching system data for
-    every non-empty group via import_systems, and sums the resulting costs, emissions,
+    Splits the features by heat_technology ("hp", "gas", "ashp_gas", "district_heat") and
+    then by pv_activated into up to eight case groups, imports the matching system data
+    for every non-empty group via import_systems, and sums the resulting costs, emissions,
     production values and load profiles into the final scenario statistics.
+
+    Used both for the initial (status-quo) scenario computation and for recomputing after
+    a scenario change -- invest costs only ever apply once a building's heat_technology
+    has actually moved away from its status-quo gas heating (see patch_system_data's
+    GATED_COST_INVEST_ATTRS), so both cases share this one function.
 
     Args:
         tagged_features: List of all building features of the scenario with populated
-            properties.tags (heat_demand/heat_cluster, elec_demand/elec_cluster,
-            heat_technology, pv_activated, roof_cluster_south/eastwest, ...).
-        area: Area name passed through to import_systems (table-name prefix).
+            properties.tags (heat_cluster, elec_cluster, heat_technology,
+            heat_technology_data, pv_activated, roof_cluster_south/eastwest, ...).
+        country: "nl" or "de" -- selects the OEP table prefix passed to import_systems.
 
     Returns:
         Tuple (energy_stats, tagged_features):
             energy_stats: Dict of all computed scenario metrics (total_heat_demand,
-                total_electricity_demand, pv_setting, self_sufficiency, total_emission,
-                total_costs_om, ...).
+                total_electricity_demand, self_sufficiency, total_emission,
+                total_costs_om, transformation_cost, ...).
             tagged_features: New, merged list of the features from the case groups that
                 actually had system data imported.
     """
     energy_stats = {}
- 
+
     hp_only_cases = []
     hp_pv_cases = []
     gas_only_cases = []
     gas_pv_cases = []
     ashp_gas_only_cases = []
     ashp_gas_pv_cases = []
- 
-    # Statistics accumulated from the features
-    total_heat_demand = 0.0
-    total_heat_produced = 0
-    total_electricity_demand = 0.0
-    pv_potential_total = 0.0
-    pv_installed_total = 0.0
-    total_gas_import = 0.0
-    total_electricity_export = 0.0
-    total_gas_cost = 0.0
-    total_electricity_cost = 0.0
-    total_gas_emissions = 0.0
- 
-    # Analogous totals for ASHP (field names confirmed correct)
-    total_ashp_emissions = 0.0
- 
-    # Building emissions and PV production (previously missing entirely)
-    total_building_electricity_emissions = 0.0
-    total_photovoltaic_production = 0.0
- 
-    # NEU: Operation & Maintenance Kosten, pro Technologie getrennt
-    total_gas_heating_costs_om = 0.0
-    total_ashp_heating_costs_om = 0.0
-    total_thermal_storage_costs_om = 0.0
-    total_photovoltaic_costs_om = 0.0
- 
-    # Stays zero at scenario creation, since this is just the status quo and no costs have been incurred yet
-    total_transfomation_cost = 0.0
- 
+    dh_only_cases = []
+    dh_pv_cases = []
+
     hp_cases = []
     gas_cases = []
     ashp_gas_cases = []
- 
-    # Still need to be scaled up to 8760 (hourly) values
-    summed_elec_demand_profiles = np.zeros(10)
-    summed_pv_production_profiles = np.zeros(10)
-    summed_elec_import_profiles = np.zeros(10)
-    summed_elec_export_profiles = np.zeros(10)
- 
+    dh_cases = []
+
+    summed_values = {
+        "total_heat_cluster": 0.0, "total_elec_cluster": 0.0,
+        "total_roof_cluster_south": 0.0, "total_roof_cluster_eastwest": 0.0,
+
+        "total_building_electricity_cost": 0.0, "total_building_electricity_emissions": 0.0,
+
+        "total_ashp_cap_invest": 0.0, "total_ashp_cost_invest": 0.0, "total_ashp_costs_om": 0.0,
+        "total_ashp_energy_import": 0.0, "total_ashp_import_cost": 0.0,
+        "total_ashp_production": 0.0, "total_ashp_emissions": 0.0,
+
+        "total_gas_heating_cap_invest": 0.0, "total_gas_heating_cost_invest": 0.0, "total_gas_heating_costs_om": 0.0,
+        "total_gas_heating_energy_import": 0.0, "total_gas_heating_import_cost": 0.0,
+        "total_gas_heating_production": 0.0, "total_gas_heating_emissions": 0.0,
+
+        "total_hn_cap_invest": 0.0, "total_hn_cost_invest": 0.0, "total_hn_costs_om": 0.0,
+        "total_hn_energy_import": 0.0, "total_hn_import_cost": 0.0,
+        "total_hn_production": 0.0, "total_hn_emissions": 0.0,
+
+        "total_thermal_storage_cap_invest": 0.0, "total_thermal_storage_cost_invest": 0.0, "total_thermal_storage_costs_om": 0.0,
+
+        "total_battery_cap_invest": 0.0, "total_battery_cost_invest": 0.0, "total_battery_costs_om": 0.0,
+
+        "total_photovoltaic_cap_invest": 0.0, "total_photovoltaic_cost_invest": 0.0, "total_photovoltaic_costs_om": 0.0,
+        "total_photovoltaic_production": 0.0, "total_photovoltaic_profits": 0.0,
+
+        "summed_electricity_demand_profile": np.zeros(8760), "summed_pv_generation_profile": np.zeros(8760),
+        "summed_electricity_import_profile": np.zeros(8760), "summed_electricity_export_profile": np.zeros(8760),
+    }
+
     for feature in tagged_features:
         tags = feature["properties"]["tags"]
- 
-        total_heat_demand += float(tags["heat_demand"])
-        total_electricity_demand += float(tags["elec_demand"])
-        roof_total = tags["roof_cluster_eastwest"] + tags["roof_cluster_south"]
-        pv_potential_total += roof_total
-        if tags["pv_activated"] == "true":
-            pv_installed_total += roof_total
- 
+
+        summed_values["total_heat_cluster"] += float(tags["heat_cluster"])
+        summed_values["total_elec_cluster"] += float(tags["elec_cluster"])
+        summed_values["total_roof_cluster_south"] += float(tags["roof_cluster_south"])
+        summed_values["total_roof_cluster_eastwest"] += float(tags["roof_cluster_eastwest"])
+
         if tags["heat_technology"] == "hp":
             hp_cases.append(feature)
         elif tags["heat_technology"] == "ashp_gas":
             ashp_gas_cases.append(feature)
-        elif tags["heat_technology"] in ("gas", "district_heat"):
+        elif tags["heat_technology"] == "gas":
             gas_cases.append(feature)
- 
-    energy_stats["total_heat_demand"] = total_heat_demand
-    energy_stats["total_electricity_demand"] = total_electricity_demand
-    energy_stats["pv_setting"] = (pv_installed_total / pv_potential_total * 100) if pv_potential_total > 0 else 0.0
+        elif tags["heat_technology"] == "district_heat":
+            dh_cases.append(feature)
 
     # Load the required combinations from the MOSAIQ DB for the HP cases
     if len(hp_cases) > 0:
-        hp_heat_demand = sum(float(f["properties"]["tags"]["heat_demand"]) for f in hp_cases)
-        hp_share = hp_heat_demand / total_heat_demand
-        energy_stats["ashp_setting"] = hp_share * 100
- 
+
         hp_only_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         hp_pv_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
-        if len(hp_only_cases) > 0:
-            hp_only_cases = import_systems(hp_only_cases, "hp_only", country)
-            for feature in hp_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-        if len(hp_pv_cases) > 0:
-            hp_pv_cases = import_systems(hp_pv_cases, "hp_pv", country)
-            for feature in hp_pv_cases:
-                tags = feature["properties"]["tags"]
 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
- 
-                # Sums
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
+        if len(hp_only_cases) > 0:
+            hp_only_cases = import_systems(hp_only_cases, summed_values, "hp_only", country)
+        if len(hp_pv_cases) > 0:
+            hp_pv_cases = import_systems(hp_pv_cases, summed_values, "hp_pv", country)
+
     # Load the required combinations from the MOSAIQ DB for the gas cases
     if len(gas_cases) > 0:
-        gas_heat_demand = sum(float(f["properties"]["tags"]["heat_demand"]) for f in gas_cases)
-        gas_share = gas_heat_demand / total_heat_demand
-        energy_stats["gas_setting"] = gas_share * 100
- 
         gas_only_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         gas_pv_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
-        if len(gas_only_cases) > 0:
-            gas_only_cases = import_systems(gas_only_cases, "gas_only", country)
-            for feature in gas_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums
-                # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-        if len(gas_pv_cases) > 0:
-            gas_pv_cases = import_systems(gas_pv_cases, "gas_pv", country)
-            for feature in gas_pv_cases:
-                tags = feature["properties"]["tags"]
 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
- 
-                # Sums
-                # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
+        if len(gas_only_cases) > 0:
+            gas_only_cases = import_systems(gas_only_cases, summed_values, "gas_only", country)
+        if len(gas_pv_cases) > 0:
+            gas_pv_cases = import_systems(gas_pv_cases, summed_values, "gas_pv", country)
+
     # Load the required combinations for ASHP+gas hybrid heat pumps.
     # Beide Komponenten sind gleichzeitig installiert, daher fliessen die Werte
     # in BEIDE bestehenden Technologie-Totals (ashp_* UND gas_*) gleichzeitig ein.
     if len(ashp_gas_cases) > 0:
-        ashp_gas_heat_demand = sum(float(f["properties"]["tags"]["heat_demand"]) for f in ashp_gas_cases)
-        ashp_gas_share = ashp_gas_heat_demand / total_heat_demand
-        energy_stats["ashp_gas_setting"] = ashp_gas_share * 100
- 
+
         ashp_gas_only_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
         ashp_gas_pv_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
+
         if len(ashp_gas_only_cases) > 0:
-            ashp_gas_only_cases = import_systems(ashp_gas_only_cases, "ashp_gas_only", country)
-            for feature in ashp_gas_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums -- ASHP share
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                # Sums -- gas share
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
+            ashp_gas_only_cases = import_systems(ashp_gas_only_cases, summed_values, "ashp_gas_only", country)
         if len(ashp_gas_pv_cases) > 0:
-            ashp_gas_pv_cases = import_systems(ashp_gas_pv_cases, "ashp_gas_pv", country)
-            for feature in ashp_gas_pv_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
- 
-                # Sums -- ASHP share
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                # Sums -- gas share
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
-    total_electricity_import = sum(summed_elec_import_profiles)
-    total_electricity_export = sum(summed_elec_export_profiles)
+            ashp_gas_pv_cases = import_systems(ashp_gas_pv_cases, summed_values, "ashp_gas_pv", country)
+
+    # Load the required combinations for district heat systems.
+    if len(dh_cases) > 0:
+
+        dh_only_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "false"]
+        dh_pv_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "true"]
+
+        if len(dh_only_cases) > 0:
+            dh_only_cases = import_systems(dh_only_cases, summed_values, "dh_only", country)
+        if len(dh_pv_cases) > 0:
+            dh_pv_cases = import_systems(dh_pv_cases, summed_values, "dh_pv", country)
+
+    # Calculate the sums for electricity in and exports
+    total_electricity_import = sum(summed_values["summed_electricity_import_profile"])
+    total_electricity_export = sum(summed_values["summed_electricity_export_profile"])
+
     # total_pv_production kommt direkt aus dem annualen "photovoltaic_production"-Tag,
     # NOT from the profile array (the profile is kept separately for time-series purposes)
-    total_emission = total_gas_emissions + total_ashp_emissions + total_building_electricity_emissions
-    total_costs_om = (
-        total_gas_heating_costs_om
-        + total_ashp_heating_costs_om
-        + total_thermal_storage_costs_om
-        + total_photovoltaic_costs_om
+    total_emission = (
+        summed_values["total_gas_heating_emissions"]
+        + summed_values["total_ashp_emissions"]
+        + summed_values["total_hn_emissions"]
+        + summed_values["total_building_electricity_emissions"]
     )
-    self_sufficiency = 1 - total_electricity_import / total_electricity_demand
- 
+
+    total_costs_om = (
+        summed_values["total_gas_heating_costs_om"]
+        + summed_values["total_ashp_costs_om"]
+        + summed_values["total_hn_costs_om"]
+        + summed_values["total_thermal_storage_costs_om"]
+        + summed_values["total_photovoltaic_costs_om"]
+        + summed_values["total_battery_costs_om"]
+    )
+
+    total_heat_produced = (
+        summed_values["total_ashp_production"]
+        + summed_values["total_gas_heating_production"]
+        + summed_values["total_hn_production"]
+    )
+
+    energy_stats["total_heat_demand"] = summed_values["total_heat_cluster"]
+    energy_stats["total_electricity_demand"] = summed_values["total_elec_cluster"]
+    self_sufficiency = 1 - total_electricity_import / summed_values["total_elec_cluster"]
+
     # How much of the import could be avoided through local sharing (simultaneous export)
     # Only the minimum of import/export counts per timestep.
-    sharable_per_timestep = np.minimum(summed_elec_import_profiles, summed_elec_export_profiles)
-    reducible_import = sum(sharable_per_timestep)          # kWh that could be avoided through sharing
+    sharable_per_timestep = np.minimum(summed_values["summed_electricity_import_profile"], summed_values["summed_electricity_export_profile"])
+    reducible_import = sum(sharable_per_timestep)    # kWh that could be avoided through sharing
     remaining_import = total_electricity_import - reducible_import  # kWh that would still have to come from the grid
     energy_sharing_potential = reducible_import / total_electricity_import if total_electricity_import > 0 else 0.0
- 
+
     # Electricity stats
     energy_stats["self_sufficiency"] = self_sufficiency * 100
     energy_stats["total_electricity_import"] = total_electricity_import
     energy_stats["total_electricity_export"] = total_electricity_export
-    energy_stats["total_electricity_cost"] = total_electricity_cost
+    energy_stats["total_electricity_cost"] = summed_values["total_building_electricity_cost"]  # + summed_values["total_ashp_import_cost"]
     energy_stats["reducible_import_kwh"] = reducible_import
     energy_stats["remaining_import_kwh"] = remaining_import
     energy_stats["energy_sharing_potential"] = energy_sharing_potential * 100
- 
+
     # Production & emissions (combined across all technologies)
-    energy_stats["total_pv_production"] = total_photovoltaic_production
+    energy_stats["total_pv_production"] = summed_values["total_photovoltaic_production"]
     energy_stats["total_heat_production"] = total_heat_produced
     # /1e6: g -> t CO2, keeps the published stat within the API's integer range
     energy_stats["total_emission"] = total_emission / 1_000_000
- 
-    # Operation & maintenance costs, per technology and combined
-    energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om
-    energy_stats["total_ashp_heating_costs_om"] = total_ashp_heating_costs_om
-    energy_stats["total_thermal_storage_costs_om"] = total_thermal_storage_costs_om
-    energy_stats["total_photovoltaic_costs_om"] = total_photovoltaic_costs_om
+
+    # Operation & maintenance costs, combined across all technologies
     energy_stats["total_costs_om"] = total_costs_om
- 
+
     # Gas stats
-    energy_stats["total_gas_import"] = total_gas_import
-    energy_stats["total_gas_cost"] = total_gas_cost
- 
+    energy_stats["total_gas_import"] = summed_values["total_gas_heating_energy_import"]
+    energy_stats["total_gas_cost"] = summed_values["total_gas_heating_import_cost"]
+
+    # Capacity installed & invest costs, per technology (matches the stat names in
+    # energy_stats_init.json -- "ashp_heating"/"dh_heating" there, "ashp"/"hn" internally)
+    energy_stats["total_gas_heating_cap_invest"] = summed_values["total_gas_heating_cap_invest"]
+    energy_stats["total_gas_heating_cost_invest"] = summed_values["total_gas_heating_cost_invest"]
+    energy_stats["total_ashp_heating_cap_invest"] = summed_values["total_ashp_cap_invest"]
+    energy_stats["total_ashp_heating_cost_invest"] = summed_values["total_ashp_cost_invest"]
+    energy_stats["total_dh_heating_cap_invest"] = summed_values["total_hn_cap_invest"]
+    energy_stats["total_dh_heating_cost_invest"] = summed_values["total_hn_cost_invest"]
+    energy_stats["total_thermal_storage_cap_invest"] = summed_values["total_thermal_storage_cap_invest"]
+    energy_stats["total_thermal_storage_cost_invest"] = summed_values["total_thermal_storage_cost_invest"]
+    energy_stats["total_photovoltaic_cap_invest"] = summed_values["total_photovoltaic_cap_invest"]
+    energy_stats["total_photovoltaic_cost_invest"] = summed_values["total_photovoltaic_cost_invest"]
+
     # Total costs
-    energy_stats["transformation_cost"] = total_transfomation_cost
- 
-    tagged_features = gas_only_cases + gas_pv_cases + hp_only_cases + hp_pv_cases + ashp_gas_only_cases + ashp_gas_pv_cases
- 
+    total_transformation_cost = (
+        summed_values["total_gas_heating_cost_invest"]
+        + summed_values["total_ashp_cost_invest"]
+        + summed_values["total_hn_cost_invest"]
+        + summed_values["total_photovoltaic_cost_invest"]
+        + summed_values["total_battery_cost_invest"]
+        + summed_values["total_thermal_storage_cost_invest"]
+    )
+    energy_stats["transformation_cost"] = total_transformation_cost
+
+    tagged_features = gas_only_cases + gas_pv_cases + hp_only_cases + hp_pv_cases + ashp_gas_only_cases + ashp_gas_pv_cases + dh_only_cases + dh_pv_cases
+
     return energy_stats, tagged_features
 
 def process_new_scenario(scenario_id, country):
@@ -1440,7 +1414,7 @@ def check_refurb_state(tagged_features, fetched_inputs):
         The tagged_features list, whose tag dicts have been updated in place where
         applicable.
     """
-    log.info(fetched_inputs)
+    log.info(fetched_inputs) 
     min_refurb_state = fetched_inputs["min_refurb_state"]
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
@@ -1576,10 +1550,6 @@ def update_heat_techs(tagged_features, inputs):
                 tags = feature["properties"]["tags"]
                 tags["heat_technology"] = tags["heat_technology_data"]
 
-
-    print("hp set", len([feature for feature in tagged_features if feature["properties"]["tags"]["heat_technology"] == "hp"]))
-
-
     # Match the PV to the buildings prioritizing heat pumps
     num_pv_data_not_set = len(pv_cases_data_not_set)
 
@@ -1632,452 +1602,6 @@ def update_heat_techs(tagged_features, inputs):
     return tagged_features
 
 
-def calc_systems_update(tagged_features, country):
-    """Computes energy statistics from tagged_features and calls import_systems for the
-    required heating/PV combinations.
-
-    Splits the features by heat_technology ("hp", "gas"/"district_heat", "ashp_gas") and
-    then by pv_activated into up to six case groups, imports the matching system data for
-    every non-empty group via import_systems, and sums the resulting costs, emissions,
-    production values and load profiles into the final scenario statistics.
-
-    Args:
-        tagged_features: List of all building features of the scenario with populated
-            properties.tags (heat_demand/heat_cluster, elec_demand/elec_cluster,
-            heat_technology, pv_activated, roof_cluster_south/eastwest, ...).
-        area: Area name passed through to import_systems (table-name prefix).
-
-    Returns:
-        Tuple (energy_stats, tagged_features):
-            energy_stats: Dict of all computed scenario metrics (total_heat_demand,
-                total_electricity_demand, pv_setting, self_sufficiency, total_emission,
-                total_costs_om, ...).
-            tagged_features: New, merged list of the features from the case groups that
-                actually had system data imported.
-    """
-    energy_stats = {}
- 
-    hp_only_cases = []
-    hp_pv_cases = []
-    gas_only_cases = []
-    gas_pv_cases = []
-    ashp_gas_only_cases = []
-    ashp_gas_pv_cases = []
-    dh_only_cases = [] 
-    dh_pv_cases = [] 
-
-    # Statistics accumulated from the features
-    total_heat_demand = 0.0
-    total_heat_produced = 0.0
-    total_electricity_demand = 0.0
-    pv_potential_total = 0.0
-    pv_installed_total = 0.0
-    total_gas_import = 0.0
-    total_electricity_export = 0.0
-    total_gas_cost = 0.0
-    total_electricity_cost = 0.0
-    total_gas_emissions = 0.0
- 
-    # Analogous totals for ASHP (field names confirmed correct)
-    total_ashp_emissions = 0.0
-
-    # Analogous total for district heat
-    total_dh_emissions = 0.0
-
-    # Building emissions and PV production (previously missing entirely)
-    total_building_electricity_emissions = 0.0
-    total_photovoltaic_production = 0.0
-
-    # Capacity installed per technology
-    total_gas_heating_cap_invest = 0.0
-    total_ashp_heating_cap_invest = 0.0
-    total_dh_heating_cap_invest = 0.0
-    total_thermal_storage_cap_invest = 0.0
-    total_photovoltaic_cap_invest = 0.0
-
-    # Invest costs per technology
-    total_gas_heating_cost_invest = 0.0
-    total_ashp_heating_cost_invest = 0.0
-    total_dh_heating_cost_invest = 0.0
-    total_thermal_storage_cost_invest = 0.0
-    total_photovoltaic_cost_invest = 0.0
-
-    # OM costs per Technology
-    total_gas_heating_costs_om = 0.0
-    total_ashp_heating_costs_om = 0.0
-    total_dh_heating_costs_om = 0.0
-    total_thermal_storage_costs_om = 0.0
-    total_photovoltaic_costs_om = 0.0
- 
-    # Stays zero at scenario creation, since this is just the status quo and no costs have been incurred yet
-    total_transfomation_cost = 0.0
- 
-    hp_cases = []
-    gas_cases = []
-    ashp_gas_cases = []
-    dh_cases = []   
- 
-    # Still need to be scaled up to 8760 (hourly) values
-    summed_elec_demand_profiles = np.zeros(10)
-    summed_pv_production_profiles = np.zeros(10)
-    summed_elec_import_profiles = np.zeros(10)
-    summed_elec_export_profiles = np.zeros(10)
- 
-    for feature in tagged_features:
-        tags = feature["properties"]["tags"]
- 
-        total_heat_demand += float(tags["heat_cluster"])
-        total_electricity_demand += float(tags["elec_cluster"])
- 
-        roof_total = float(tags["roof_cluster_eastwest"]) + float(tags["roof_cluster_south"])
-        pv_potential_total += roof_total
-        if tags["pv_activated"] == "true":
-            pv_installed_total += roof_total
- 
-        if tags["heat_technology"] == "hp":
-            hp_cases.append(feature)
-        elif tags["heat_technology"] == "ashp_gas":
-            ashp_gas_cases.append(feature)
-        elif tags["heat_technology"] == "district_heat":
-            dh_cases.append(feature)
-        elif tags["heat_technology"] == "gas":
-            gas_cases.append(feature)
-
-
-    energy_stats["total_heat_demand"] = total_heat_demand
-    energy_stats["total_electricity_demand"] = total_electricity_demand
-    energy_stats["pv_setting"] = (pv_installed_total / pv_potential_total * 100) if pv_potential_total > 0 else 0.0
-
-    # Load the required combinations from the MOSAIQ DB for the HP cases
-    if len(hp_cases) > 0:
-        hp_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in hp_cases)
-        hp_share = hp_heat_demand / total_heat_demand
-        energy_stats["ashp_setting"] = hp_share * 100
- 
-        hp_only_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        hp_pv_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
-        if len(hp_only_cases) > 0:
-            hp_only_cases = import_systems(hp_only_cases, "hp_only", country)
-            for feature in hp_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_ashp_heating_cap_invest += float(tags["ashp_cap_invest"])
-                total_ashp_heating_cost_invest += float(tags["ashp_cost_invest"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-
-        if len(hp_pv_cases) > 0:
-            hp_pv_cases = import_systems(hp_pv_cases, "hp_pv", country)
-            for feature in hp_pv_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
- 
-                # Sums
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
-                total_ashp_heating_cap_invest += float(tags["ashp_cap_invest"])
-                total_ashp_heating_cost_invest += float(tags["ashp_cost_invest"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-                total_photovoltaic_cap_invest += float(tags["photovoltaic_cap_invest"])
-                total_photovoltaic_cost_invest += float(tags["photovoltaic_cost_invest"])
-
-    # Load the required combinations from the MOSAIQ DB for the gas cases
-    if len(gas_cases) > 0:
-        gas_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in gas_cases)
-        gas_share = gas_heat_demand / total_heat_demand
-        energy_stats["gas_setting"] = gas_share * 100
- 
-        gas_only_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        gas_pv_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
-        if len(gas_only_cases) > 0:
-            gas_only_cases = import_systems(gas_only_cases, "gas_only", country)
-            for feature in gas_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums
-                # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_gas_heating_cap_invest += float(tags["gas_heating_cap_invest"])
-                total_gas_heating_cost_invest += float(tags["gas_heating_cost_invest"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-
-        if len(gas_pv_cases) > 0:
-            gas_pv_cases = import_systems(gas_pv_cases, "gas_pv", country)
-            for feature in gas_pv_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
- 
-                # Sums
-                # total_gas_invest_cost += tags["gas_heating_cost_invest"] + tags["thermal_storage_cost_invest"] # Nur bei scenario_change
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
-                total_gas_heating_cap_invest += float(tags["gas_heating_cap_invest"])
-                total_gas_heating_cost_invest += float(tags["gas_heating_cost_invest"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-                total_photovoltaic_cap_invest += float(tags["photovoltaic_cap_invest"])
-                total_photovoltaic_cost_invest += float(tags["photovoltaic_cost_invest"])
-
-    # Load the required combinations for ASHP+gas hybrid heat pumps.
-    # Beide Komponenten sind gleichzeitig installiert, daher fliessen die Werte
-    # in BEIDE bestehenden Technologie-Totals (ashp_* UND gas_*) gleichzeitig ein.
-    if len(ashp_gas_cases) > 0:
-        ashp_gas_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in ashp_gas_cases)
-        ashp_gas_share = ashp_gas_heat_demand / total_heat_demand
-        energy_stats["ashp_gas_setting"] = ashp_gas_share * 100
- 
-        ashp_gas_only_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        ashp_gas_pv_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
- 
-        if len(ashp_gas_only_cases) > 0:
-            ashp_gas_only_cases = import_systems(ashp_gas_only_cases, "ashp_gas_only", country)
-            for feature in ashp_gas_only_cases:
-                tags = feature["properties"]["tags"]
- 
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
- 
-                # Sums -- ASHP share
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_ashp_heating_cap_invest += float(tags["ashp_cap_invest"])
-                total_ashp_heating_cost_invest += float(tags["ashp_cost_invest"])
-
-                # Sums -- gas share
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_gas_heating_cap_invest += float(tags["gas_heating_cap_invest"])
-                total_gas_heating_cost_invest += float(tags["gas_heating_cost_invest"])
-
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-
-        if len(ashp_gas_pv_cases) > 0:
-            ashp_gas_pv_cases = import_systems(ashp_gas_pv_cases, "ashp_gas_pv", country)
-            for feature in ashp_gas_pv_cases:
-                tags = feature["properties"]["tags"]
-
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
-
-                # Sums -- ASHP share
-                total_heat_produced += float(tags["ashp_production"])
-                total_ashp_emissions += float(tags["ashp_emissions"])
-                total_ashp_heating_costs_om += float(tags["ashp_costs_om"])
-                total_ashp_heating_cap_invest += float(tags["ashp_cap_invest"])
-                total_ashp_heating_cost_invest += float(tags["ashp_cost_invest"])
-
-                # Sums -- gas share
-                total_heat_produced += float(tags["gas_heating_production"])
-                total_gas_import += float(tags["gas_heating_energy_import"])
-                total_gas_cost += float(tags["gas_heating_import_cost"])
-                total_gas_emissions += float(tags["gas_heating_emissions"])
-                total_gas_heating_costs_om += float(tags["gas_heating_costs_om"])
-                total_gas_heating_cap_invest += float(tags["gas_heating_cap_invest"])
-                total_gas_heating_cost_invest += float(tags["gas_heating_cost_invest"])
-
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-                total_photovoltaic_cap_invest += float(tags["photovoltaic_cap_invest"])
-                total_photovoltaic_cost_invest += float(tags["photovoltaic_cost_invest"])
-
-    # Load the required combinations for district heat.
-    # Beide Komponenten sind gleichzeitig installiert, daher fliessen die Werte
-    # in BEIDE bestehenden Technologie-Totals (ashp_* UND gas_*) gleichzeitig ein.
-    if len(dh_cases) > 0:
-        dh_heat_demand = sum(float(f["properties"]["tags"]["heat_cluster"]) for f in dh_cases)
-        dh_share = dh_heat_demand / total_heat_demand
-        energy_stats["dh_setting"] = dh_share * 100
-    
-        dh_only_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        dh_pv_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "true"]
-    
-        if len(dh_only_cases) > 0:
-            dh_only_cases = import_systems(dh_only_cases, "dh_only", country)
-            for feature in dh_only_cases:
-                tags = feature["properties"]["tags"]
-    
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-    
-                # Sums
-                total_heat_produced += float(tags["hn_production"])
-                total_dh_emissions += float(tags["hn_emissions"])
-                total_dh_heating_costs_om += float(tags["hn_costs_om"])
-                total_dh_heating_cap_invest += float(tags["hn_cap_invest"])
-                total_dh_heating_cost_invest += float(tags["hn_cost_invest"])
-
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-
-        if len(dh_pv_cases) > 0:
-            dh_pv_cases = import_systems(dh_pv_cases, "dh_pv", country)
-            for feature in dh_pv_cases:
-                tags = feature["properties"]["tags"]
-    
-                # Profiles
-                summed_elec_import_profiles += np.array(parse_profile(tags["electricity_import_profile"]), dtype=float)
-                summed_elec_demand_profiles += np.array(parse_profile(tags["electricity_demand_profile"]), dtype=float)
-                summed_pv_production_profiles += np.array(parse_profile(tags["pv_generation_profile"]), dtype=float)
-                summed_elec_export_profiles += np.array(parse_profile(tags["electricity_export_profile"]), dtype=float)
-    
-                # Sums
-                total_heat_produced += float(tags["hn_production"])
-                total_dh_emissions += float(tags["hn_emissions"])
-                total_dh_heating_costs_om += float(tags["hn_costs_om"])
-                total_dh_heating_cap_invest += float(tags["hn_cap_invest"])
-                total_dh_heating_cost_invest += float(tags["hn_cost_invest"])
-
-                # Sums -- shared
-                total_electricity_cost += float(tags["building_electricity_cost"])
-                total_building_electricity_emissions += float(tags["building_electricity_emissions"])
-                total_thermal_storage_costs_om += float(tags["thermal_storage_costs_om"])
-                total_thermal_storage_cap_invest += float(tags["thermal_storage_cap_invest"])
-                total_thermal_storage_cost_invest += float(tags["thermal_storage_cost_invest"])
-                total_photovoltaic_production += float(tags["photovoltaic_production"])
-                total_photovoltaic_costs_om += float(tags["photovoltaic_costs_om"])
-                total_photovoltaic_cap_invest += float(tags["photovoltaic_cap_invest"])
-                total_photovoltaic_cost_invest += float(tags["photovoltaic_cost_invest"])
-
-    total_electricity_import = sum(summed_elec_import_profiles)
-    total_electricity_export = sum(summed_elec_export_profiles)
-    # total_pv_production kommt direkt aus dem annualen "photovoltaic_production"-Tag,
-    # NOT from the profile array (the profile is kept separately for time-series purposes)
-    total_emission = total_gas_emissions + total_ashp_emissions + total_dh_emissions + total_building_electricity_emissions
-    total_costs_om = (
-        total_gas_heating_costs_om
-        + total_ashp_heating_costs_om
-        + total_dh_heating_costs_om
-        + total_thermal_storage_costs_om
-        + total_photovoltaic_costs_om
-    )
-    self_sufficiency = 1 - total_electricity_import / total_electricity_demand
-
-    # How much of the import could be avoided through local sharing (simultaneous export)
-    # Only the minimum of import/export counts per timestep.
-    sharable_per_timestep = np.minimum(summed_elec_import_profiles, summed_elec_export_profiles)
-    reducible_import = sum(sharable_per_timestep)          # kWh that could be avoided through sharing
-    remaining_import = total_electricity_import - reducible_import  # kWh that would still have to come from the grid
-    energy_sharing_potential = reducible_import / total_electricity_import if total_electricity_import > 0 else 0.0
-
-    # Electricity stats
-    energy_stats["self_sufficiency"] = self_sufficiency * 100
-    energy_stats["total_electricity_import"] = total_electricity_import
-    energy_stats["total_electricity_export"] = total_electricity_export
-    energy_stats["total_electricity_cost"] = total_electricity_cost
-    energy_stats["reducible_import_kwh"] = reducible_import
-    energy_stats["remaining_import_kwh"] = remaining_import
-    energy_stats["energy_sharing_potential"] = energy_sharing_potential * 100
-
-    # Production & emissions (combined across all technologies)
-    energy_stats["total_pv_production"] = total_photovoltaic_production
-    energy_stats["total_heat_production"] = total_heat_produced
-    # /1e6: g -> t CO2, keeps the published stat within the API's integer range
-    energy_stats["total_emission"] = total_emission / 1_000_000
-
-    # Operation & maintenance costs, per technology and combined
-    energy_stats["total_gas_heating_costs_om"] = total_gas_heating_costs_om
-    energy_stats["total_ashp_heating_costs_om"] = total_ashp_heating_costs_om
-    energy_stats["total_thermal_storage_costs_om"] = total_thermal_storage_costs_om
-    energy_stats["total_photovoltaic_costs_om"] = total_photovoltaic_costs_om
-    energy_stats["total_costs_om"] = total_costs_om
-
-    # Capacity installed & invest costs, per technology
-    energy_stats["total_gas_heating_cap_invest"] = total_gas_heating_cap_invest
-    energy_stats["total_gas_heating_cost_invest"] = total_gas_heating_cost_invest
-    energy_stats["total_ashp_heating_cap_invest"] = total_ashp_heating_cap_invest
-    energy_stats["total_ashp_heating_cost_invest"] = total_ashp_heating_cost_invest
-    energy_stats["total_dh_heating_cap_invest"] = total_dh_heating_cap_invest
-    energy_stats["total_dh_heating_cost_invest"] = total_dh_heating_cost_invest
-    energy_stats["total_thermal_storage_cap_invest"] = total_thermal_storage_cap_invest
-    energy_stats["total_thermal_storage_cost_invest"] = total_thermal_storage_cost_invest
-    energy_stats["total_photovoltaic_cap_invest"] = total_photovoltaic_cap_invest
-    energy_stats["total_photovoltaic_cost_invest"] = total_photovoltaic_cost_invest
-
-    # Gas stats
-    energy_stats["total_gas_import"] = total_gas_import
-    energy_stats["total_gas_cost"] = total_gas_cost
-
-    # Total costs
-    energy_stats["transformation_cost"] = total_transfomation_cost
-
-    tagged_features = gas_only_cases + gas_pv_cases + hp_only_cases + hp_pv_cases + ashp_gas_only_cases + ashp_gas_pv_cases + dh_only_cases + dh_pv_cases
-
-    return energy_stats, tagged_features
-
 def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
@@ -2085,7 +1609,7 @@ def update_energy_patches(energy_stats, existing_stats):
     scenarioValue with the (int-cast) computed value.
 
     Args:
-        energy_stats: Dict {stat_name: value}, as returned by calc_systems_update.
+        energy_stats: Dict {stat_name: value}, as returned by calc_systems.
         existing_stats: List of existing stat dicts for the scenario, as returned by
             fetch_stats.
 
@@ -2141,9 +1665,9 @@ def process_scenario_changes(scenario_id, country):
     tagged_features = update_heat_techs(tagged_features, fetched_inputs)
 
     # 5. This is where the technologies would need to be imported from the OEP and matched to the buildings
-    energy_stats, tagged_features = calc_systems_update(tagged_features, country)
+    energy_stats, tagged_features = calc_systems(tagged_features, country)
 
-    # calc_systems_update never touches this key itself; without it the
+    # calc_systems never touches this key itself; without it the
     # "min_refurbishment_state" stat stays frozen at its initial value and never
     # reflects the min_refurb_state slider (see update_energy_patches below).
     energy_stats["min_refurbishment_state"] = fetched_inputs["min_refurb_state"]
@@ -2194,16 +1718,6 @@ def process_scenario_changes(scenario_id, country):
 
     total_duration = time.perf_counter() - pipeline_start
     log.info(f"=== Finished pipeline for scenario {scenario_id} in {total_duration:.2f}s ===")
-
-
-def fetch_scenarios():
-    """Every scenario this key's municipalities cover, with id/name/bbox."""
-    log.info("Fetching scenarios")
-    resp = requests.get(f"{API_BASE}/v1/scenarios", headers=HEADERS)
-    resp.raise_for_status()
-    scenarios = resp.json()
-    log.info(f"Fetched {len(scenarios)} scenarios")
-    return scenarios
 
 
 def get_country(scenario_id, scenarios):

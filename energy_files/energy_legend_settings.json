@@ -1,7 +1,7 @@
 {"invisible_fields_oep": {
     "buildings": ["heat_demand_1", "heat_demand_2", "heat_demand_3",
     "heat_cluster_1", "heat_cluster_2", "heat_cluster_3", "roof_area_south", "roof_area_eastwest", "pv_activated", "pv_activated_data"], 
-    "systems": ["gas_boiler_cap_invest", "gas_boiler_cost_invest", "system_id"]
+    "systems": ["system_id", "gas_heating_cost_periodical", "ashp_cost_periodical", "hn_cost_periodical", "battery_cost_periodical", "thermal_storage_cost_periodical"]
     }
 ,
   "refurbishment_state": {

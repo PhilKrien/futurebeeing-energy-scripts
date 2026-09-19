@@ -6,7 +6,7 @@
       "gas_heating_cap_invest", "gas_heating_cost_invest", "gas_heating_costs_om", "gas_heating_cost_periodical",
       "gas_heating_energy_import", "gas_heating_import_cost", "gas_heating_production", "gas_heating_emissions",
       "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
-      "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+      "electricity_demand_profile", "electricity_import_profile"
     ],
     "gas_pv": [
       "id", "system_id",
@@ -14,18 +14,16 @@
       "gas_heating_cap_invest", "gas_heating_cost_invest", "gas_heating_costs_om", "gas_heating_cost_periodical", "gas_heating_energy_import", "gas_heating_import_cost", "gas_heating_production", "gas_heating_emissions",
       "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
       "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
-      "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
-      "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
-      "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
-      "photovoltaic_production", "photovoltaic_profits",
-      "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+      "photovoltaic_cap_invest", "photovoltaic_cost_invest", "photovoltaic_costs_om", "photovoltaic_cost_periodical", "photovoltaic_production", "photovoltaic_profits",
+      "pv_generation_profile", 
+      "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile"
     ],
     "hp_only": [
       "id", "system_id",
       "building_electricity_cost", "building_electricity_emissions",
       "ashp_cap_invest", "ashp_cost_invest", "ashp_costs_om", "ashp_cost_periodical", "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
       "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
-      "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+      "electricity_demand_profile", "electricity_import_profile"
     ],
     "hp_pv": [
       "id", "system_id",
@@ -33,11 +31,8 @@
       "ashp_cap_invest", "ashp_cost_invest", "ashp_costs_om", "ashp_cost_periodical", "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
       "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
       "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
-      "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
-      "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
-      "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
-      "photovoltaic_production", "photovoltaic_profits",
-      "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+      "photovoltaic_cap_invest", "photovoltaic_cost_invest", "photovoltaic_costs_om", "photovoltaic_cost_periodical", "photovoltaic_production", "photovoltaic_profits",
+      "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile"
     ],
     "ashp_gas_only": [
     "id", "system_id",
@@ -47,7 +42,7 @@
     "ashp_cap_invest", "ashp_cost_invest", "ashp_costs_om", "ashp_cost_periodical",
     "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
     "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
-    "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+    "electricity_demand_profile", "electricity_import_profile"
     ],
     "ashp_gas_pv": [
     "id", "system_id",
@@ -58,11 +53,8 @@
     "ashp_energy_import", "ashp_import_cost", "ashp_production", "ashp_emissions", "ashp_cop",
     "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
     "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
-    "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
-    "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
-    "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
-    "photovoltaic_production", "photovoltaic_profits",
-    "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+    "photovoltaic_cap_invest", "photovoltaic_cost_invest", "photovoltaic_costs_om", "photovoltaic_cost_periodical", "photovoltaic_production", "photovoltaic_profits",
+    "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile"
     ],
     "dh_only": [
     "id", "system_id",
@@ -70,7 +62,7 @@
     "hn_cap_invest", "hn_cost_invest", "hn_costs_om", "hn_cost_periodical",
     "hn_energy_import", "hn_import_cost", "hn_production", "hn_emissions",
     "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
-    "electricity_demand_profile", "electricity_import_profile", "heat_demand_profile"
+    "electricity_demand_profile", "electricity_import_profile"
     ],
     "dh_pv": [
     "id", "system_id",
@@ -79,11 +71,8 @@
     "hn_energy_import", "hn_import_cost", "hn_production", "hn_emissions",
     "thermal_storage_cap_invest", "thermal_storage_cost_invest", "thermal_storage_costs_om", "thermal_storage_cost_periodical",
     "battery_cap_invest", "battery_cost_invest", "battery_costs_om", "battery_cost_periodical",
-    "photovoltaic_south_cap_invest", "photovoltaic_south_cost_invest", "photovoltaic_south_costs_om", "photovoltaic_south_cost_periodical", "photovoltaic_south_production",
-    "photovoltaic_east_cap_invest", "photovoltaic_east_cost_invest", "photovoltaic_east_costs_om", "photovoltaic_east_cost_periodical", "photovoltaic_east_production",
-    "photovoltaic_west_cap_invest", "photovoltaic_west_cost_invest", "photovoltaic_west_costs_om", "photovoltaic_west_cost_periodical", "photovoltaic_west_production",
-    "photovoltaic_production", "photovoltaic_profits",
-    "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile", "heat_demand_profile"
+    "photovoltaic_cap_invest", "photovoltaic_cost_invest", "photovoltaic_costs_om", "photovoltaic_cost_periodical", "photovoltaic_production", "photovoltaic_profits",
+    "pv_generation_profile", "electricity_export_profile", "electricity_import_profile", "electricity_demand_profile"
     ]
   }, 
   "static_cols": {

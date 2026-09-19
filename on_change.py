@@ -452,17 +452,26 @@ def update_heat_techs(tagged_features, inputs):
                  
 
 # Fetch the energy systems from the OEP based on the system_ids
-def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
+def fetch_multiple_system_ids_advanced(system_ids, url, table_name, column_names):
     """Queries the OEP advanced-search API for every row of a table whose system_id is in
-    the given set (system_id = sid1 OR system_id = sid2 OR ...).
+    the given set (system_id = sid1 OR system_id = sid2 OR ...), restricted to the given
+    columns.
 
     Args:
         system_ids: Iterable of system_id strings to search for.
         url: Base URL of the OEP API (e.g. OEP_BASE_URL); "/advanced/search" is appended.
         table_name: Name of the target table on the OEP (e.g. "hoogeveen_gas_only").
+        column_names: Ordered list of column names to request (typically
+            IMPORT_VARIABLES["column_names"][case_name]) -- only these columns are
+            fetched, not every column of the table.
 
     Returns:
-        List of raw data rows (result["data"]) from the OEP response.
+        Tuple (rows, column_names): rows is the list of raw data rows (result["data"])
+        from the OEP response; column_names is the table's actual column names, in the
+        same order as each row's values, taken from the query's own live
+        content.description (a psycopg2-style cursor description) rather than any
+        separately maintained config -- the query has no explicit "fields" list, so the
+        row layout depends entirely on the live table schema, which drifts over time.
     """
     or_conditions = [
         {
@@ -478,6 +487,7 @@ def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
 
     query = {
         "query": {
+            "fields": [{"type": "column", "column": col} for col in column_names],
             "from": {"type": "table", "table": table_name},
             "where": {
                 "type": "operator",
@@ -494,9 +504,11 @@ def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
     res.raise_for_status()
     result = res.json()
 
+    column_names = [col[0] for col in result.get("content", {}).get("description", [])]
+
     rowcount = result.get("content", {}).get("rowcount")
     if rowcount == 0:
-        return []
+        return [], column_names
 
     if "data" not in result:
         raise RuntimeError(
@@ -504,7 +516,7 @@ def fetch_multiple_system_ids_advanced(system_ids, url, table_name):
             f"(rowcount={rowcount}); full response: {result}"
         )
 
-    return result["data"]
+    return result["data"], column_names
 
      
      
@@ -594,7 +606,7 @@ def fetch_inputs(scenario_id):
 
 
 # Convert the response data to a hashable dict of tags -> system_id: tags
-def convert_response_data(response, import_column_names):
+def convert_response_data(response, column_names):
     """Converts the raw, column-less OEP rows (lists of values) into a dict of named
     columns per system_id.
 
@@ -604,15 +616,17 @@ def convert_response_data(response, import_column_names):
     Args:
         response: List of raw data rows (lists), as returned by
             fetch_multiple_system_ids_advanced.
-        import_column_names: Full column name list of the source table (including id and
-            system_id at position 0/1); only the part from index 2 onward is used for
+        column_names: Full column name list of the source table (including id and
+            system_id at position 0/1), in the same order as each row's values -- the
+            live column_names returned by fetch_multiple_system_ids_advanced, not a
+            separately maintained config. Only the part from index 2 onward is used for
             the mapping.
 
     Returns:
         Dict {system_id: {column_name: value, ...}} for fast lookup in patch_system_data.
     """
     response_data = {}
-    data_column_names = import_column_names[2:]
+    data_column_names = column_names[2:]
     for row in response: 
         row_system_id = row[1]
         data_columns = row[2:]
@@ -645,12 +659,12 @@ def import_systems(case_features, case_name, area):
     static_cols = IMPORT_VARIABLES["static_cols"][case_name]
     import_column_names = IMPORT_VARIABLES["column_names"][case_name]
     combinations = create_system_id(case_features, static_cols)
-    
+
     table_name = area + f"_{case_name}"
-    
+
     # Import and merge system data
-    response = fetch_multiple_system_ids_advanced(combinations, OEP_BASE_URL, table_name)
-    response_data = convert_response_data(response, import_column_names)
+    response, column_names = fetch_multiple_system_ids_advanced(combinations, OEP_BASE_URL, table_name, import_column_names)
+    response_data = convert_response_data(response, column_names)
 
     # Patch the tags with the system data
     case_features = patch_system_data(case_features, response_data)
