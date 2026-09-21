@@ -10,9 +10,9 @@
       "label": "Refurbishment state",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#d41515"},
-        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#E0C918"},
-        {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#20940E"}
+        {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#c14949"},
+        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#CDC060"},
+        {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#4DA540"}
       ]
     }
   },
@@ -22,10 +22,10 @@
       "label": "Heating technology",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#147004"},
-        {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#d20505"},
-        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#073392"},
-        {"kind": "match", "match": [["heat_technology", "ashp_gas"]], "label": "ASHP-Gas Hybrid", "colour": "#08B4C0"}
+        {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#407B36"},
+        {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#913939"},
+        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#385490"},
+        {"kind": "match", "match": [["heat_technology", "ashp_gas"]], "label": "ASHP-Gas Hybrid", "colour": "#3C8E94"}
       ]
     }
   },
@@ -35,17 +35,17 @@
       "label": "PV systems",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "match", "match": [["pv_activated", "true"]], "label": "Installed", "colour": "#f7b500"}
+        {"kind": "match", "match": [["pv_activated", "true"]], "label": "Installed", "colour": "#c4a03f" }
       ]
     }
   },
   "dh_potential": {
     "key": "dh_potential",
     "source": {
-      "label": "District heat potentials",
+      "label": "Possible heatnet consumers",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "match", "match": [["dh_potential", "true"]], "label": "Potential", "colour": "#a30505"}
+        {"kind": "match", "match": [["dh_potential", "true"]], "label": "Potential buildings", "colour": "#d17171"}
       ]
     }
   }

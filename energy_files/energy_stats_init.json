@@ -150,36 +150,6 @@
         "subcategory": "imports"
     },
     {
-        "name": "reducible_import_kwh",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "kWh_per_a",
-        "visible": true,
-        "source": "Calculation",
-        "category": "ENERGY",
-        "subcategory": "imports"
-    },
-    {
-        "name": "remaining_import_kwh",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "kWh_per_a",
-        "visible": true,
-        "source": "Calculation",
-        "category": "ENERGY",
-        "subcategory": "imports"
-    },
-    {
         "name": "total_electricity_export",
         "scenarioId": "empty",
         "startValue": {
@@ -253,7 +223,7 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "installed_capacities"
     },
     {
         "name": "total_gas_heating_cost_invest",
@@ -283,7 +253,7 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "installed_capacities"
     },
     {
         "name": "total_ashp_heating_cost_invest",
@@ -313,7 +283,7 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "installed_capacities"
     },
     {
         "name": "total_dh_heating_cost_invest",
@@ -343,7 +313,7 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "installed_capacities"
     },
     {
         "name": "total_thermal_storage_cost_invest",
@@ -373,7 +343,7 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "installed_capacities"
     },
     {
         "name": "total_photovoltaic_cost_invest",
@@ -389,35 +359,5 @@
         "source": "MOSAIQ",
         "category": "ENERGY",
         "subcategory": "costs"
-    },
-    {
-        "name": "total_costs_om",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "euro_per_a",
-        "visible": true,
-        "source": "Calculation",
-        "category": "ENERGY",
-        "subcategory": "costs"
-    },
-    {
-        "name": "dh_potential_buildings",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "none",
-        "visible": true,
-        "source": "Calculation",
-        "category": "ENERGY",
-        "subcategory": "heat_network"
     }
 ]

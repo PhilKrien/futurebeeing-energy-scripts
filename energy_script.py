@@ -431,71 +431,55 @@ def format_like_hstore(v):
         return str(int(v))
     return str(v)
 
-def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=4, cmap_name="YlOrRd"):
-    """Builds a legend definition from a set of values, either as exact-match buckets or
-    as evenly sized range buckets.
+def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=8, cmap_name="YlOrRd"):
+    """Builds a legend definition using fixed range buckets whose edges, size and
+    colormap are hardcoded per key ("heat_cluster" or "elec_cluster"), rather than
+    derived from the passed-in values.
 
     Args:
-        values: Array (or array-like) of raw values to build the legend from (e.g. all
-            heat_cluster or elec_cluster values of a scenario).
+        values: Unused -- kept for call-site/signature compatibility.
         name: Display name of the legend (title-cased and used as "label").
-        key: Legend definition key passed through to declare_legend.
+        key: Selects the bucket edges/colormap ("heat_cluster" or "elec_cluster") and
+            is passed through to declare_legend.
         unit: Unit shown in the bucket labels.
-        n_max_buckets: Threshold at or below which exact-match buckets are built instead
-            of evenly sized range buckets.
-        cmap_name: Name of the Matplotlib colormap used for the bucket colours.
+        n_max_buckets: Number of range buckets to build; the last bucket is open-ended
+            ("<min>+ <unit>").
+        cmap_name: Name of the Matplotlib colormap used for the bucket colours; overridden
+            by a fixed value for each supported key.
 
     Returns:
         Legend definition dict (key, label, category, unit, buckets) ready for
-        declare_legend, or None if no values remain after removing NaNs.
+        declare_legend.
     """
-    float_values = values.astype(float)
-    clean_values = float_values[~np.isnan(float_values)]
-    unique_values = np.unique(clean_values)
-    n_unique = len(unique_values)
-
-    if n_unique == 0:
-        log.warning(f"No values available to build '{name}' legend -- skipping")
-        return None
-
-    if n_unique < n_max_buckets:
-        colours = sample_colours_from_cmap(cmap_name, n_unique)
-        # Bucket boundaries meet at the midpoint between neighbouring values instead of a
-        # fixed +/-1 padding, so closely spaced values (e.g. cluster centroids) never
-        # produce overlapping ranges.
-        edges = (
-            [unique_values[0] - 1]
-            + [(unique_values[i] + unique_values[i + 1]) / 2 for i in range(n_unique - 1)]
-            + [unique_values[-1] + 1]
-        )
-        buckets = [
-            {
-                "kind": "range",
-                "min": edges[i],
-                "max": edges[i + 1],
-                "label": f"{unique_values[i]:.2f} {unit}",
-                "colour": colours[i],
-            }
-            for i in range(n_unique)
-        ]
-    else:
-        k = n_max_buckets
-        max_value = unique_values.max()
-        min_value = unique_values.min()
-        difference = max_value - min_value
-        bucket_size = difference / 4
+    
+    max_value = 1_000_000
+    if key == "heat_cluster":
+        min_value = 1000
+        bucket_size = 15000
+        cmap_name = "coolwarm"
         
-        edges = [min_value, min_value + bucket_size, min_value + 2 * bucket_size, min_value + 3 * bucket_size, max_value + 1]
-        colours = sample_colours_from_cmap(cmap_name, k)
-        buckets = [
+    elif key == "elec_cluster":
+        min_value = 1000
+        bucket_size = 2000
+        cmap_name = "plasma"
+    
+    edges = [min_value, min_value + bucket_size, min_value + 2 * bucket_size, min_value + 3 * bucket_size, min_value + 4 * bucket_size, min_value + 5 * bucket_size, 
+             min_value + 6 * bucket_size, min_value + 7 * bucket_size, max_value + 1]
+    
+    colours = sample_colours_from_cmap(cmap_name, n_max_buckets)
+    buckets = [
             {
                 "kind": "range",
                 "min": edges[i],
                 "max": edges[i + 1],
-                "label": f"{edges[i]:.0f}\u2013{edges[i+1]:.0f} {unit}",
+                "label": (
+                    f"{edges[i]:.0f}–{edges[i+1]:.0f} {unit}"
+                    if i < n_max_buckets - 1
+                    else f"{edges[i]:.0f}+ {unit}"
+                ),
                 "colour": colours[i],
             }
-            for i in range(k)
+            for i in range(n_max_buckets)
         ]
 
     return {
@@ -505,7 +489,8 @@ def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=4, cmap_n
         "unit": unit,
         "buckets": buckets,
     }
-
+     
+        
 def build_heatline_legend(values, name, key, unit="MWh/a/m", cmap_name="coolwarm"):
     """Builds a legend definition for heat-line density values, always as the same four
     fixed range buckets (0-500, 500-1500, 1500-2500, 2500+), regardless of the scenario's
@@ -651,13 +636,13 @@ def patch_system_data(tagged_features, response_data, summed_values):
                     # tatsaechlich unterscheidet (gas -> hp/ashp_gas/district_heat). Bei ashp_gas (Hybrid) wird
                     # auch die neue Gaskomponente mit angerechnet.
                     if attribute == "ashp_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                        if feature_tags["heat_technology_data"] == "gas":
                             summed_values[value_name] += value
                     elif attribute == "gas_heating_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] == "ashp_gas" :
                             summed_values[value_name] += value
                     elif attribute == "hn_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] != feature_tags["heat_technology_data"]:
+                        if feature_tags["heat_technology_data"] == "gas":
                             summed_values[value_name] += value
                     else:
                         summed_values[value_name] += value
@@ -1629,8 +1614,7 @@ def process_scenario_changes(scenario_id, country):
     lower refurbishment states per min_refurb_state -> recompute the heat network's line
     density and each building's district-heating potential from the updated heat demand ->
     recompute energy statistics and import the matching heating/PV system data -> patch
-    the updated building and line tags -> publish the heat-demand and heat-line-density
-    legends -> publish the new/updated energy stats.
+    the updated building and line tags -> publish the new/updated energy stats.
 
     Args:
         scenario_id: ID of the scenario to process (from the triggering event's payload).
@@ -1639,7 +1623,7 @@ def process_scenario_changes(scenario_id, country):
 
     Returns:
         None. All results are persisted directly via the API endpoints (update_buildings,
-        declare_legend, publish_energy_stats, update_stats).
+        publish_energy_stats, update_stats).
     """
     pipeline_start = time.perf_counter()
     log.info(f"=== Starting pipeline for scenario {scenario_id} ===")
@@ -1681,29 +1665,6 @@ def process_scenario_changes(scenario_id, country):
         update_buildings(features_to_patch)
         _log_step("update_buildings", t0, n_patches=len(features_to_patch))
 
-
-    # 7. Declare legend (upserts by key)
-    t0 = time.perf_counter()
-
-    legend_definitions = []
-
-    # Heat demand legend
-    heat_demand = np.array([feature["properties"]["tags"]["heat_cluster"] for feature in tagged_features])
-    heat_demand_legend = build_demand_legend(heat_demand, "Heat demand", "heat_cluster")
-    if heat_demand_legend is not None:
-        legend_definitions.append(heat_demand_legend)
-
-    # Base case heat line density legend
-    base_heatline = np.array([pipe["properties"]["tags"]["base_heatline"] for pipe in line_features])
-    base_heatline_legend = build_heatline_legend(base_heatline, "Heat line density base case", "base_heatline")
-    if base_heatline_legend is not None:
-        legend_definitions.append(base_heatline_legend)
-
-    if legend_definitions:
-        declare_legend(legend_definitions)
-
-    _log_step("declare_legend", t0)
-
     t0 = time.perf_counter()
 
     patches = update_energy_patches(energy_stats, existing_stats)
@@ -1728,7 +1689,7 @@ def get_country(scenario_id, scenarios):
 
     # As long as there is no defined countries in the backend, we resort to hardcoded checking, 
     # defaulting to nl for the first pilots
-    if country_str in ["Germany", "Deutschland", "DE", "GER"] :
+    if country_str in ["Germany", "Deutschland", "DE", "GER", "de"] :
         country = "de"
     elif country_str in ["Netherlands", "Nederlands", "Nl", "nl"]:
         country = "nl"
