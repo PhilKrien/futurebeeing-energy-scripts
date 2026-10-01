@@ -51,11 +51,16 @@ available_files = resp.json()
 current_file = next((file for file in available_files if file["name"] == "energy_import_variables.json"), None)
 resp  = requests.get(f"{API_BASE}/v1/scripts/files/{current_file['id']}", headers=HEADERS)
 IMPORT_VARIABLES = resp.json()
+COLS_TO_DELETE = IMPORT_VARIABLES["cols_to_delete"]
 
-# Impoert the stats initialization pattern 
+# Impoert the stats initialization pattern
 current_file = next((file for file in available_files if file["name"] == "energy_stats_init.json"), None)
 resp  = requests.get(f"{API_BASE}/v1/scripts/files/{current_file['id']}", headers=HEADERS)
 STATS_INIT = resp.json()
+INIT_STATS = STATS_INIT["init_stats"]
+# STATS_INIT["stats_name_dict"] maps a stat's human-readable "name" back to the
+# energy_stats key that holds its value.
+STAT_NAME_TO_KEY = STATS_INIT["stats_name_dict"]
 
 # Import the settings necessary for different legends
 current_file = next((file for file in available_files if file["name"] == "energy_legend_settings.json"), None)
@@ -120,7 +125,7 @@ def declare_inputs(definitions):
     card with no header."""
     log.info(f"Declaring {len(definitions)} scenario input definitions")
     resp = requests.post(f"{API_BASE}/v1/scenario-inputs/definitions", headers=HEADERS, json={"definitions": definitions})
-    resp.raise_for_status()
+    _check_upload(resp, "POST /v1/scenario-inputs/definitions")
 
 def fetch_scenarios():
     """Every scenario this key's municipalities cover, with id/name/bbox."""
@@ -146,7 +151,7 @@ def fetch_features(scenario_id):
     for feature in features:
         if feature["geometry"]["type"] in ["Polygon", "MultiPolygon"] and (
             feature["properties"]["building"] in ["house", "apartments", "bungalow", "detached", "residential", "terrace", "semidetached_house", "farm", "annexe"]
-            or "ref:bag" in feature["properties"]["tags"]
+            or "ref:bag" in (feature["properties"]["tags"] or {})
         ):
             building_features.append(feature)
         elif feature["geometry"]["type"] in ["LineString", "MultiLineString"] and feature["properties"]["highway"] in ["secondary", "tertiary", "residential", "unclassified", "service"]:
@@ -164,9 +169,67 @@ def fetch_tagged_buildings(scenario_id):
     resp.raise_for_status()
     features = resp.json()
     log.info(f"Fetched {len(features)} features for scenario {scenario_id}")
-    features = [feature for feature in features if "heat_cluster" in feature["properties"]["tags"]]
+    features = [feature for feature in features if "heat_cluster" in (feature["properties"]["tags"] or {})]
     log.info(f"Kept {len(features)} features with polygons.")
     return features
+
+def _sanitize_patch(patch):
+    """Strips fields the /v1/geojson PATCH schema rejects on a raw fetched Feature
+    (top-level "type", properties' "osm_id"/"created_at") and coerces tag values to
+    strings, since tags are stored as hstore (string-only)."""
+    patch = dict(patch)
+    patch.pop("type", None)
+    properties = patch.get("properties")
+    if properties:
+        properties = dict(properties)
+        properties.pop("osm_id", None)
+        properties.pop("created_at", None)
+        tags = properties.get("tags")
+        if tags:
+            properties["tags"] = {
+                key: value if value is None or isinstance(value, str)
+                else "true" if value is True
+                else "false" if value is False
+                else str(value)
+                for key, value in tags.items()
+            }
+        patch["properties"] = properties
+    return patch
+
+# Limits for one PATCH /v1/geojson request (see update_buildings)
+PATCH_BATCH_MAX_BYTES = 8_000_000  # backend rejects request bodies above 10 MB
+PATCH_BATCH_MAX_FEATURES = 100
+
+def _check_upload(resp, what, extra=""):
+    """Logs status code, reason, key headers and body of a failed upload request, then
+    re-raises the HTTP error, so the cause is visible in the log and not just as a bare
+    exception. extra: optional additional context (e.g. payload size) appended to the line."""
+    if not resp.ok:
+        headers = {key: resp.headers.get(key) for key in ("Content-Type", "Content-Length", "Server")}
+        log.error(
+            f"{what} failed with {resp.status_code} {resp.reason}: {resp.text[:1000]!r} "
+            f"| response headers: {headers} {extra}"
+        )
+        resp.raise_for_status()
+
+def _split_into_batches(patches):
+    """Splits the patches into batches that stay below PATCH_BATCH_MAX_BYTES (measured as
+    JSON size) and PATCH_BATCH_MAX_FEATURES, so that no single request gets too large."""
+    batches = []
+    batch = []
+    batch_bytes = 0
+    for patch in patches:
+        patch_bytes = len(json.dumps(patch))
+        batch_is_full = batch_bytes + patch_bytes > PATCH_BATCH_MAX_BYTES or len(batch) >= PATCH_BATCH_MAX_FEATURES
+        if batch and batch_is_full:
+            batches.append(batch)
+            batch = []
+            batch_bytes = 0
+        batch.append(patch)
+        batch_bytes += patch_bytes
+    if batch:
+        batches.append(batch)
+    return batches
 
 def update_buildings(patches):
     """patches: list of {"id": feature_id, "properties": {"tags": {...}}} (or any of the other
@@ -174,8 +237,14 @@ def update_buildings(patches):
     Recorded as a changeset attributed to this script - visible (and revertible) from the
     scenario's History tab, same as a person's own edits."""
     log.info(f"Updating {len(patches)} features")
-    resp = requests.patch(f"{API_BASE}/v1/geojson", headers=HEADERS, json=patches)
-    resp.raise_for_status()
+    patches = [_sanitize_patch(patch) for patch in patches]
+
+    batches = _split_into_batches(patches)
+    for number, batch in enumerate(batches, start=1):
+        batch_info = f"batch {number}/{len(batches)} ({len(batch)} features)"
+        log.info(f"PATCH /v1/geojson {batch_info}")
+        resp = requests.patch(f"{API_BASE}/v1/geojson", headers=HEADERS, json=batch)
+        _check_upload(resp, "PATCH /v1/geojson", extra=f"| {batch_info}, feature ids: {[p.get('id') for p in batch]}")
 
 def fetch_stats(scenario_id):
     """Every stats row for the scenario."""
@@ -183,7 +252,7 @@ def fetch_stats(scenario_id):
     resp = requests.get(f"{API_BASE}/v1/stats", headers=HEADERS, params={"scenarioId": scenario_id})
     resp.raise_for_status()
     stats = resp.json()
-    log.info(f"Fetched {len(stats)} stats for scenario {scenario_id}")
+    stats =   [{"id": stat_dict["id"], "scenarioValue": stat_dict["scenarioValue"], "name": stat_dict["name"]} for stat_dict in stats]
     return stats
 
 def declare_legend(definitions):
@@ -198,8 +267,9 @@ def declare_legend(definitions):
     unit is free text shown next to the parameter header - omit/None for no unit."""
     log.info(f"Declaring {len(definitions)} legend parameter definitions")
     resp = requests.post(f"{API_BASE}/v1/legend/definitions", headers=HEADERS, json={"definitions": definitions})
-    resp.raise_for_status()
+    _check_upload(resp, "POST /v1/legend/definitions")
     return resp.json()
+
 
 def publish_energy_stats(patches):
     """Publishes a new stat for the energy calculations.
@@ -217,11 +287,8 @@ def publish_energy_stats(patches):
         for stat in patches:
             resp = requests.post(f"{API_BASE}/v1/stats", headers=HEADERS, json=[stat])
             if not resp.ok:
-                log.info(f"FEHLER bei: {stat['name']}")
-                log.info(resp.text)
-                log.info(stat)
-                log.error(f"POST /v1/stats failed with {resp.status_code}: {resp.text[:1000]}")
-                resp.raise_for_status()
+                log.error(f"Stat '{stat['name']}' rejected, payload: {stat}")
+                _check_upload(resp, "POST /v1/stats")
 
 def update_stats(patches):
     """patches: list of {"id": stat_id, ...fields to change} (name/statType/visible/source/
@@ -229,7 +296,7 @@ def update_stats(patches):
     log.info(f"Updating {len(patches)} stats.")
     if len(patches) > 0:
         resp = requests.patch(f"{API_BASE}/v1/stats", headers=HEADERS, json=patches)
-        resp.raise_for_status()
+        _check_upload(resp, "PATCH /v1/stats")
 
 def fetch_inputs(scenario_id):
     """Current value of every input this script has declared, for this scenario - {key: value},
@@ -237,7 +304,12 @@ def fetch_inputs(scenario_id):
     log.info(f"Fetching scenario inputs for scenario {scenario_id}")
     resp = requests.get(f"{API_BASE}/v1/scenario-inputs", headers=HEADERS, params={"scenario_id": scenario_id})
     resp.raise_for_status()
-    return resp.json()
+    fetched_inputs = resp.json()
+    fetched_inputs = next(iter(fetched_inputs.values()))
+    # Only keep the important attributes of stats
+    
+    return fetched_inputs
+
 
 #----------------------------------------------------------------------------
 # API-Endpunkte: OpenEnergyPlatform (OEP)
@@ -429,6 +501,7 @@ def format_like_hstore(v):
     """
     if float(v).is_integer():
         return str(int(v))
+      
     return str(v)
 
 def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=8, cmap_name="YlOrRd"):
@@ -461,7 +534,7 @@ def build_demand_legend(values, name, key, unit="kWh/a", n_max_buckets=8, cmap_n
     elif key == "elec_cluster":
         min_value = 1000
         bucket_size = 2000
-        cmap_name = "plasma"
+        cmap_name = "RdYlGn_r"
     
     edges = [min_value, min_value + bucket_size, min_value + 2 * bucket_size, min_value + 3 * bucket_size, min_value + 4 * bucket_size, min_value + 5 * bucket_size, 
              min_value + 6 * bucket_size, min_value + 7 * bucket_size, max_value + 1]
@@ -590,7 +663,7 @@ def create_system_id(tagged_features, static_cols):
         combinations.add(combination)
     return combinations
 
-def patch_system_data(tagged_features, response_data, summed_values):
+def patch_system_data(tagged_features, response_data):
     """Enriches each feature with the technical system data matching its system_id, and
     accumulates the technical values into summed_values in place.
 
@@ -612,67 +685,39 @@ def patch_system_data(tagged_features, response_data, summed_values):
         callers rely on every returned feature actually carrying the imported fields.
     """
     patched_features = []
+    features_to_patch = []
+    
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
         feature_system_id = feature_tags["system_id"]
 
         if feature_system_id not in response_data:
-            log.warning(f"No OEP entry for system_id '{feature_system_id}' (feature {feature.get('id')}) -- skipping")
+            log.warning(
+                f"No OEP entry for system_id '{feature_system_id}' (feature {feature.get('id')}) "
+                f"-- the OEP download is incomplete or faulty"
+            )
+            patched_features.append(feature)
             continue
+        else:
+            # Delete all energy system tags that were previously installed
+            for col in COLS_TO_DELETE:
+                feature_tags.pop(col, None)
+        
+            tech_data = response_data[feature_system_id]
+            tag_techs = {}
+            for attribute, value in tech_data.items():
+                    if value is not None and ("cost" in attribute or "profit" in attribute):
+                        value = round(float(value), 3)
+                    tag_techs[attribute] = value
 
-        tech_data = response_data[feature_system_id]
-        tag_techs = {}
-        for attribute, value in tech_data.items():
-            if isinstance(value, list):
-                if f"summed_{attribute}" in summed_values:
-                    summed_values[f"summed_{attribute}"] += np.array(parse_profile(value), dtype=float)
+            feature_tags.update(tag_techs)
 
-            else:
-                value_name = f"total_{attribute}"
-                if value_name in summed_values:
-                    # Costs should only be applied, when the heat_technology is transformed. Status quo can't cost anything.
-                    # "heat_technology_data == gas" allein reicht nicht: ein unveraendertes Gas-Gebaeude hat
-                    # heat_technology_data == heat_technology == "gas" auch. Nur anrechnen, wenn sich die Technik
-                    # tatsaechlich unterscheidet (gas -> hp/ashp_gas/district_heat). Bei ashp_gas (Hybrid) wird
-                    # auch die neue Gaskomponente mit angerechnet.
-                    if attribute == "ashp_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas":
-                            summed_values[value_name] += value
-                    elif attribute == "gas_heating_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] == "ashp_gas" :
-                            summed_values[value_name] += value
-                    elif attribute == "hn_cost_invest":
-                        if feature_tags["heat_technology_data"] == "gas":
-                            summed_values[value_name] += value
-                    else:
-                        summed_values[value_name] += value
+            for field in INVISIBLE_FIELDS_OEP["systems"]:
+                feature_tags[f"visible:{field}"] = "false"
                 
-                tag_techs[attribute] = value
+            patched_features.append(feature)
 
-        feature_tags.update(tag_techs)
-
-        # The OEP only stores photovoltaic cap_invest/cost_invest/costs_om/cost_periodical
-        # split by roof orientation (south/east/west) -- add the combined total here so it's
-        # available under the same key naming as the already-combined production/profits,
-        # and feed that combined total into summed_values same as the other technologies.
-        for pv_metric in ["cap_invest", "cost_invest", "costs_om", "cost_periodical"]:
-            south_key = f"photovoltaic_south_{pv_metric}"
-            if south_key in feature_tags:
-                feature_tags[f"photovoltaic_{pv_metric}"] = (
-                    float(feature_tags[south_key])
-                    + float(feature_tags[f"photovoltaic_east_{pv_metric}"])
-                    + float(feature_tags[f"photovoltaic_west_{pv_metric}"])
-                )
-                total_key = f"total_photovoltaic_{pv_metric}"
-                if total_key in summed_values:
-                    summed_values[total_key] += feature_tags[f"photovoltaic_{pv_metric}"]
-
-        for field in INVISIBLE_FIELDS_OEP["systems"]:
-            feature_tags[f"visible:{field}"] = "false"
-
-        patched_features.append(feature)
-
-    return patched_features
+    return patched_features, features_to_patch
 
 def convert_response_data(response, column_names):
     """Converts the raw, column-less OEP rows (lists of values) into a dict of named
@@ -705,7 +750,7 @@ def convert_response_data(response, column_names):
     return response_data
 
 
-def import_systems(case_features, summed_values, case_name, country):
+def import_systems(case_features, case_name, country):
     """Imports the matching technical system data from the OEP for one technology/PV case
     group (e.g. "gas_only", "hp_pv") and patches it into the corresponding features.
 
@@ -735,10 +780,7 @@ def import_systems(case_features, summed_values, case_name, country):
     response, column_names = fetch_multiple_system_ids_advanced(combinations, table_name, import_column_names)
     response_data = convert_response_data(response, column_names)
 
-    # Patch the tags with the system data
-    case_features = patch_system_data(case_features, response_data, summed_values)
-
-    return case_features
+    return response_data
 
 
 def check_patches(patches, existing_stats):
@@ -922,36 +964,36 @@ def create_insert_tags(buildings_data, osm_gdf, feature_list):
         feature_id = feature.get("id", None)
         if feature_id is None or feature_id not in tags_by_id:
             continue
-        merged_tags = {**feature["properties"].get("tags", {}), **tags_by_id[feature_id]}
+        merged_tags = {**(feature["properties"].get("tags") or {}), **tags_by_id[feature_id]}
         patches.append({"id": feature["id"], "geometry": feature["geometry"], "properties": {"tags": merged_tags}})
 
     return patches, scenario_features_data
 
 def create_energy_patches(energy_stats, scenario_id):
-    """Builds the patch list for the stats endpoint from the STATS_INIT template and the
+    """Builds the patch list for the stats endpoint from the INIT_STATS template and the
     computed energy_stats.
 
-    Iterates over the global STATS_INIT template (the fixed order/structure of every
-    possible stat) and, for every entry whose "name" appears in energy_stats, overwrites
-    startValue and scenarioValue with the computed value (as int).
+    Iterates over the global INIT_STATS template (the fixed order/structure of every
+    possible stat) and, for every entry whose displayed "name" maps (via
+    STAT_NAME_TO_KEY) to a key present in energy_stats, overwrites startValue and
+    scenarioValue with the computed value (as int).
 
     Args:
         energy_stats: Dict {stat_name: value}, as returned by calc_systems().
         scenario_id: ID of the scenario the stats belong to.
 
     Returns:
-        List of the (mutated) stat dicts from STATS_INIT, each with scenarioId set and,
+        List of the (mutated) stat dicts from INIT_STATS, each with scenarioId set and,
         where available, updated values.
     """
-    init_json = STATS_INIT
-    energy_stats_keys = energy_stats.keys()
+    init_json = INIT_STATS
     for stat in init_json:
-        name = stat["name"]
         stat["scenarioId"] = scenario_id
-        if name in energy_stats_keys:
-            stat["startValue"]["quantative"] = int(energy_stats[name])
-            stat["scenarioValue"]["quantative"] = int(energy_stats[name])
-    return init_json 
+        key = STAT_NAME_TO_KEY.get(stat["name"])
+        if key in energy_stats:
+            stat["startValue"]["quantative"] = int(energy_stats[key])
+            stat["scenarioValue"]["quantative"] = int(energy_stats[key])
+    return init_json
 
 def calc_heatline_density(line_gdf, tagged_features, case):
     """Nearest-neighbour-assigns each building's heat demand to a heat network pipe
@@ -1010,6 +1052,8 @@ def patch_line_features(line_gdf, line_features):
         feature_id = feature["id"]
         if feature_id in id_list:
             heat_line_density = line_gdf.loc[line_gdf["id"] == feature_id, "base_heatline"].iloc[0]
+            if feature["properties"]["tags"] is None:
+                feature["properties"]["tags"] = {}
             feature["properties"]["tags"]["base_heatline"] = heat_line_density
 
     return line_features
@@ -1025,7 +1069,7 @@ def setup_heat_network(tagged_features, line_features, line_gdf):
     return tagged_features, line_features
 
 
-def calc_systems(tagged_features, country):
+def calc_systems(tagged_features, buildings_to_set, script_type, country):
     """Computes energy statistics from tagged_features and calls import_systems for the
     required heating/PV combinations.
 
@@ -1055,20 +1099,6 @@ def calc_systems(tagged_features, country):
     """
     energy_stats = {}
 
-    hp_only_cases = []
-    hp_pv_cases = []
-    gas_only_cases = []
-    gas_pv_cases = []
-    ashp_gas_only_cases = []
-    ashp_gas_pv_cases = []
-    dh_only_cases = []
-    dh_pv_cases = []
-
-    hp_cases = []
-    gas_cases = []
-    ashp_gas_cases = []
-    dh_cases = []
-
     summed_values = {
         "total_heat_cluster": 0.0, "total_elec_cluster": 0.0,
         "total_roof_cluster_south": 0.0, "total_roof_cluster_eastwest": 0.0,
@@ -1097,72 +1127,130 @@ def calc_systems(tagged_features, country):
         "summed_electricity_demand_profile": np.zeros(8760), "summed_pv_generation_profile": np.zeros(8760),
         "summed_electricity_import_profile": np.zeros(8760), "summed_electricity_export_profile": np.zeros(8760),
     }
+    
+    # Note: total_heat_cluster / total_elec_cluster / total_roof_cluster_* are summed in the
+    # generic tag loop below (their tag names match the "total_<tag>" keys) -- do not sum
+    # them here as well, or they are counted twice.
+
+    if script_type == "creation":
+        hp_only_cases = []
+        hp_pv_cases = []
+        gas_only_cases = []
+        gas_pv_cases = []
+        ashp_gas_only_cases = []
+        ashp_gas_pv_cases = []
+        dh_only_cases = []
+        dh_pv_cases = []
+
+        for feature in tagged_features:
+            tags = feature["properties"]["tags"]
+
+            if tags["heat_technology"] == "hp":
+                if tags["pv_activated"] == "true":
+                    hp_pv_cases.append(feature)
+                else:
+                    hp_only_cases.append(feature)
+            elif tags["heat_technology"] == "ashp_gas":
+                if tags["pv_activated"] == "true":
+                    ashp_gas_pv_cases.append(feature)
+                else:
+                    ashp_gas_only_cases.append(feature)
+            elif tags["heat_technology"] == "gas":
+                if tags["pv_activated"] == "true":
+                    gas_pv_cases.append(feature)
+                else:
+                    gas_only_cases.append(feature)
+            elif tags["heat_technology"] == "district_heat":
+                if tags["pv_activated"] == "true":
+                    dh_pv_cases.append(feature)
+                else:
+                    dh_only_cases.append(feature)
+                
+    elif script_type == "change":
+        hp_only_cases = buildings_to_set["hp_only_cases"]
+        hp_pv_cases = buildings_to_set["hp_pv_cases"]
+        gas_only_cases = buildings_to_set["gas_only_cases"]
+        gas_pv_cases = buildings_to_set["gas_pv_cases"]
+        ashp_gas_only_cases = buildings_to_set["ashp_gas_only_cases"]
+        ashp_gas_pv_cases = buildings_to_set["ashp_gas_pv_cases"]
+        dh_only_cases = buildings_to_set["dh_only_cases"]
+        dh_pv_cases = buildings_to_set["dh_pv_cases"]
+
+    # Import and patch every case group with its OWN OEP response. The system_ids of
+    # e.g. gas_only and dh_only are built from identical static_cols, so a shared
+    # response dict would let one technology overwrite the other's data (a gas building
+    # ending up with hn_* values and no gas_* values).
+    case_groups = [
+        ("hp_only", hp_only_cases), ("hp_pv", hp_pv_cases),
+        ("gas_only", gas_only_cases), ("gas_pv", gas_pv_cases),
+        # ASHP+gas hybrids: both components are installed at the same time, so the values
+        # flow into BOTH existing technology totals (ashp_* AND gas_*).
+        ("ashp_gas_only", ashp_gas_only_cases), ("ashp_gas_pv", ashp_gas_pv_cases),
+        ("dh_only", dh_only_cases), ("dh_pv", dh_pv_cases),
+    ]
+    grouped_ids = {id(f) for _, case_features in case_groups for f in case_features}
+    # Features outside every case group (only possible for script_type "change") pass through untouched.
+    remaining_features = [f for f in tagged_features if id(f) not in grouped_ids]
+    tagged_features = []
+    for case_name, case_features in case_groups:
+        if len(case_features) == 0:
+            continue
+        case_response = import_systems(case_features, case_name, country)
+        patched_case_features, _ = patch_system_data(case_features, case_response)
+        tagged_features.extend(patched_case_features)
+    tagged_features.extend(remaining_features)
 
     for feature in tagged_features:
-        tags = feature["properties"]["tags"]
+        feature_tags = feature["properties"]["tags"]
+        for tag, value in feature_tags.items():
+            if isinstance(value, list):
+                if f"summed_{tag}" in summed_values:
+                    summed_values[f"summed_{tag}"] += np.array(parse_profile(value), dtype=float)
+                # The profiles stay in the tags, they are needed again later.
 
-        summed_values["total_heat_cluster"] += float(tags["heat_cluster"])
-        summed_values["total_elec_cluster"] += float(tags["elec_cluster"])
-        summed_values["total_roof_cluster_south"] += float(tags["roof_cluster_south"])
-        summed_values["total_roof_cluster_eastwest"] += float(tags["roof_cluster_eastwest"])
+            else:
+                value_name = f"total_{tag}"
+                if value_name in summed_values:
+                    # Costs should only be applied, when the heat_technology is transformed. Status quo can't cost anything.
+                    # "heat_technology_data == gas" allein reicht nicht: ein unveraendertes Gas-Gebaeude hat
+                    # heat_technology_data == heat_technology == "gas" auch. Nur anrechnen, wenn sich die Technik
+                    # tatsaechlich unterscheidet (gas -> hp/ashp_gas/district_heat). Bei ashp_gas (Hybrid) wird
+                    # auch die neue Gaskomponente mit angerechnet.
+                    if tag == "ashp_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] in ("hp", "ashp_gas"):
+                            summed_values[value_name] += float(value)
+                    elif tag == "gas_heating_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] == "ashp_gas" :
+                            summed_values[value_name] += float(value)
+                    elif tag == "hn_cost_invest":
+                        if feature_tags["heat_technology_data"] == "gas" and feature_tags["heat_technology"] == "district_heat":
+                            summed_values[value_name] += float(value)
+                    elif tag == "thermal_storage_cost_invest":
+                        if feature_tags["heat_technology_data"] != feature_tags["heat_technology"]:
+                            summed_values[value_name] += float(value)
+                    else:
+                        summed_values[value_name] += float(value)
 
-        if tags["heat_technology"] == "hp":
-            hp_cases.append(feature)
-        elif tags["heat_technology"] == "ashp_gas":
-            ashp_gas_cases.append(feature)
-        elif tags["heat_technology"] == "gas":
-            gas_cases.append(feature)
-        elif tags["heat_technology"] == "district_heat":
-            dh_cases.append(feature)
-
-    # Load the required combinations from the MOSAIQ DB for the HP cases
-    if len(hp_cases) > 0:
-
-        hp_only_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        hp_pv_cases = [f for f in hp_cases if f["properties"]["tags"]["pv_activated"] == "true"]
-
-        if len(hp_only_cases) > 0:
-            hp_only_cases = import_systems(hp_only_cases, summed_values, "hp_only", country)
-        if len(hp_pv_cases) > 0:
-            hp_pv_cases = import_systems(hp_pv_cases, summed_values, "hp_pv", country)
-
-    # Load the required combinations from the MOSAIQ DB for the gas cases
-    if len(gas_cases) > 0:
-        gas_only_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        gas_pv_cases = [f for f in gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
-
-        if len(gas_only_cases) > 0:
-            gas_only_cases = import_systems(gas_only_cases, summed_values, "gas_only", country)
-        if len(gas_pv_cases) > 0:
-            gas_pv_cases = import_systems(gas_pv_cases, summed_values, "gas_pv", country)
-
-    # Load the required combinations for ASHP+gas hybrid heat pumps.
-    # Beide Komponenten sind gleichzeitig installiert, daher fliessen die Werte
-    # in BEIDE bestehenden Technologie-Totals (ashp_* UND gas_*) gleichzeitig ein.
-    if len(ashp_gas_cases) > 0:
-
-        ashp_gas_only_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        ashp_gas_pv_cases = [f for f in ashp_gas_cases if f["properties"]["tags"]["pv_activated"] == "true"]
-
-        if len(ashp_gas_only_cases) > 0:
-            ashp_gas_only_cases = import_systems(ashp_gas_only_cases, summed_values, "ashp_gas_only", country)
-        if len(ashp_gas_pv_cases) > 0:
-            ashp_gas_pv_cases = import_systems(ashp_gas_pv_cases, summed_values, "ashp_gas_pv", country)
-
-    # Load the required combinations for district heat systems.
-    if len(dh_cases) > 0:
-
-        dh_only_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "false"]
-        dh_pv_cases = [f for f in dh_cases if f["properties"]["tags"]["pv_activated"] == "true"]
-
-        if len(dh_only_cases) > 0:
-            dh_only_cases = import_systems(dh_only_cases, summed_values, "dh_only", country)
-        if len(dh_pv_cases) > 0:
-            dh_pv_cases = import_systems(dh_pv_cases, summed_values, "dh_pv", country)
-
+        # The OEP only stores photovoltaic cap_invest/cost_invest/costs_om/cost_periodical
+        # split by roof orientation (south/east/west) -- add the combined total here so it's
+        # available under the same key naming as the already-combined production/profits,
+        # and feed that combined total into summed_values same as the other technologies.
+        for pv_metric in ["cap_invest", "cost_invest", "costs_om", "cost_periodical"]:
+            south_key = f"photovoltaic_south_{pv_metric}"
+            if south_key in feature_tags:
+                feature_tags[f"photovoltaic_{pv_metric}"] = round(
+                    float(feature_tags[south_key])
+                    + float(feature_tags[f"photovoltaic_east_{pv_metric}"])
+                    + float(feature_tags[f"photovoltaic_west_{pv_metric}"]),
+                    3,
+                )
+                total_key = f"total_photovoltaic_{pv_metric}"
+                if total_key in summed_values:
+                    summed_values[total_key] += feature_tags[f"photovoltaic_{pv_metric}"]  
+                    
     # Calculate the sums for electricity in and exports
     total_electricity_import = sum(summed_values["summed_electricity_import_profile"])
-    total_electricity_export = sum(summed_values["summed_electricity_export_profile"])
+    total_electricity_export = sum(summed_values["summed_electricity_export_profile"])       
 
     # total_pv_production kommt direkt aus dem annualen "photovoltaic_production"-Tag,
     # NOT from the profile array (the profile is kept separately for time-series purposes)
@@ -1189,8 +1277,15 @@ def calc_systems(tagged_features, country):
     )
 
     energy_stats["total_heat_demand"] = summed_values["total_heat_cluster"]
-    energy_stats["total_electricity_demand"] = summed_values["total_elec_cluster"]
-    self_sufficiency = 1 - total_electricity_import / summed_values["total_elec_cluster"]
+
+    # Electricity demand and self-sufficiency are calculated purely from the profiles.
+    total_electricity_demand = sum(summed_values["summed_electricity_demand_profile"])
+    energy_stats["total_electricity_demand"] = total_electricity_demand
+    self_sufficiency = 1 - total_electricity_import / total_electricity_demand if total_electricity_demand > 0 else 0.0
+    log.info(
+        f"electricity profiles: demand={total_electricity_demand:.1f}, "
+        f"import={total_electricity_import:.1f}, export={total_electricity_export:.1f}"
+    )
 
     # How much of the import could be avoided through local sharing (simultaneous export)
     # Only the minimum of import/export counts per timestep.
@@ -1231,6 +1326,8 @@ def calc_systems(tagged_features, country):
     energy_stats["total_dh_heating_cost_invest"] = summed_values["total_hn_cost_invest"]
     energy_stats["total_thermal_storage_cap_invest"] = summed_values["total_thermal_storage_cap_invest"]
     energy_stats["total_thermal_storage_cost_invest"] = summed_values["total_thermal_storage_cost_invest"]
+    energy_stats["total_battery_cap_invest"] = summed_values["total_battery_cap_invest"]
+    energy_stats["total_battery_cost_invest"] = summed_values["total_battery_cost_invest"]
     energy_stats["total_photovoltaic_cap_invest"] = summed_values["total_photovoltaic_cap_invest"]
     energy_stats["total_photovoltaic_cost_invest"] = summed_values["total_photovoltaic_cost_invest"]
 
@@ -1245,7 +1342,12 @@ def calc_systems(tagged_features, country):
     )
     energy_stats["transformation_cost"] = total_transformation_cost
 
-    tagged_features = gas_only_cases + gas_pv_cases + hp_only_cases + hp_pv_cases + ashp_gas_only_cases + ashp_gas_pv_cases + dh_only_cases + dh_pv_cases
+    # Round every cost/profit stat to 3 decimals (matches the import-time rounding above;
+    # summing already-rounded values can otherwise reintroduce float noise like
+    # 12.345000000000006).
+    for key, val in energy_stats.items():
+        if isinstance(val, (int, float)) and ("cost" in key or "profit" in key):
+            energy_stats[key] = round(val, 3)
 
     return energy_stats, tagged_features
 
@@ -1296,7 +1398,7 @@ def process_new_scenario(scenario_id, country):
     _log_step("create_insert_tags", t0, n_patches=len(tagged_features))
 
     # 5. This is where the technologies would need to be imported from the OEP and matched to the buildings
-    energy_stats, tagged_features = calc_systems(tagged_features, country)
+    energy_stats, tagged_features = calc_systems(tagged_features, [], "creation", country)
 
     # 6. Calculate the heat network's line density and each building's district-heating potential
     tagged_features, line_features = setup_heat_network(tagged_features, line_features, line_gdf)
@@ -1418,6 +1520,50 @@ def check_refurb_state(tagged_features, fetched_inputs):
     return tagged_features
 
 
+def get_tech_states(tagged_features):
+    tech_states_dict =  {feature["id"]: (feature["properties"]["tags"]["heat_technology"], feature["properties"]["tags"]["pv_activated"]) for feature in tagged_features}
+    return tech_states_dict
+
+
+def get_changed_systems(tech_states_before, tech_states_after, tagged_features):
+    features_to_change = {"hp_only_cases": [], "hp_pv_cases": [], "gas_only_cases": [], "gas_pv_cases": [], 
+                          "ashp_gas_only_cases": [], "ashp_gas_pv_cases": [], "dh_only_cases": [], "dh_pv_cases": []}
+    for feature_id in tech_states_before:
+        if tech_states_before[feature_id] != tech_states_after[feature_id]:
+            state = tech_states_after[feature_id][0]
+            pv_state = tech_states_after[feature_id][1]
+            if state == "hp":
+                if pv_state == "true":
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["hp_pv_cases"].append(feature_id)
+                else:
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["hp_only_cases"].append(feature_id)
+            elif state == "ashp_gas":
+                if pv_state == "true":
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["ashp_gas_pv_cases"].append(feature_id)
+                else:
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["ashp_gas_only_cases"].append(feature_id)
+            elif state == "gas":
+                if pv_state == "true":
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["gas_pv_cases"].append(feature_id)
+                else:
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["gas_only_cases"].append(feature_id)
+            elif state == "district_heat":
+                if pv_state == "true":
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["dh_pv_cases"].append(feature_id)
+                else:
+                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
+                    features_to_change["dh_only_cases"].append(feature_id)
+    
+    return features_to_change
+            
+
 def update_heat_techs(tagged_features, inputs):
     """Intended to redistribute buildings across heating technologies according to the
     ashp/gas/district-heat/pv scenario-input settings, then recompute per-technology heat
@@ -1472,7 +1618,6 @@ def update_heat_techs(tagged_features, inputs):
             hp_candidates[feature["id"]] = feature["properties"]["tags"]["heat_cluster"]
             if feature["properties"]["tags"]["dh_potential"] == "true":
                 dh_candidates[feature["id"]] = feature["properties"]["tags"]["heat_cluster"]
-
 
     # Sort all data dicts from low to high demand
     candidates = dict(sorted(candidates.items(), key=lambda item: float(item[1])))
@@ -1590,8 +1735,9 @@ def update_heat_techs(tagged_features, inputs):
 def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
-    For every existing stat whose name is also a key in energy_stats, overwrites its
-    scenarioValue with the (int-cast) computed value.
+    For every existing stat whose displayed name maps (via STAT_NAME_TO_KEY) to a key
+    present in energy_stats, overwrites its scenarioValue with the (int-cast) computed
+    value.
 
     Args:
         energy_stats: Dict {stat_name: value}, as returned by calc_systems.
@@ -1602,9 +1748,9 @@ def update_energy_patches(energy_stats, existing_stats):
         The existing_stats list, mutated in place.
     """
     for energy_stat in existing_stats:
-        name = energy_stat["name"]
-        if name in energy_stats:
-            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+        key = STAT_NAME_TO_KEY.get(energy_stat["name"])
+        if key in energy_stats:
+            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[key])
 
     return existing_stats
 
@@ -1646,10 +1792,14 @@ def process_scenario_changes(scenario_id, country):
     tagged_features, line_features = setup_heat_network(tagged_features, line_features, line_gdf)
     _log_step("setup_heat_network", t0, n_lines=len(line_features))
 
+    # Store the status of all heat techs before the changes
+    tech_states_before = get_tech_states(tagged_features)
     tagged_features = update_heat_techs(tagged_features, fetched_inputs)
-
+    tech_states_after = get_tech_states(tagged_features)
+    buildings_to_set = get_changed_systems(tech_states_before, tech_states_after, tagged_features)
+    
     # 5. This is where the technologies would need to be imported from the OEP and matched to the buildings
-    energy_stats, tagged_features = calc_systems(tagged_features, country)
+    energy_stats, tagged_features = calc_systems(tagged_features, buildings_to_set, "change", country)
 
     # calc_systems never touches this key itself; without it the
     # "min_refurbishment_state" stat stays frozen at its initial value and never

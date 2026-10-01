@@ -1,7 +1,7 @@
 {"invisible_fields_oep": {
     "buildings": ["heat_demand_1", "heat_demand_2", "heat_demand_3",
     "heat_cluster_1", "heat_cluster_2", "heat_cluster_3", "roof_area_south", "roof_area_eastwest", "pv_activated", "pv_activated_data"], 
-    "systems": ["system_id", "gas_heating_cost_periodical", "ashp_cost_periodical", "hn_cost_periodical", "battery_cost_periodical", "thermal_storage_cost_periodical"]
+    "systems": ["system_id", "gas_heating_cost_periodical", "ashp_cost_periodical", "hn_cost_periodical", "battery_cost_periodical", "thermal_storage_cost_periodical", "electricity_demand_profile", "electricity_import_profile", "electricity_export_profile", "pv_generation_profile"]
     }
 ,
   "refurbishment_state": {
@@ -11,7 +11,7 @@
       "category": "ENERGY",
       "buckets": [
         {"kind": "range", "min": 1, "max": 2, "label": "Existing", "colour": "#c14949"},
-        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#CDC060"},
+        {"kind": "range", "min": 2, "max": 3, "label": "Usual refurbishment", "colour": "#EDE07B"},
         {"kind": "range", "min": 3, "max": 4, "label": "Advanced refurbishment", "colour": "#4DA540"}
       ]
     }
@@ -22,10 +22,10 @@
       "label": "Heating technology",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#407B36"},
-        {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#913939"},
-        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#385490"},
-        {"kind": "match", "match": [["heat_technology", "ashp_gas"]], "label": "ASHP-Gas Hybrid", "colour": "#3C8E94"}
+        {"kind": "match", "match": [["heat_technology", "hp"]], "label": "Air heat pump", "colour": "#8CDA7E"},
+        {"kind": "match", "match": [["heat_technology", "gas"]], "label": "Gas boiler", "colour": "#E05E5E"},
+        {"kind": "match", "match": [["heat_technology", "district_heat"]], "label": "District heat", "colour": "#6A93ED"},
+        {"kind": "match", "match": [["heat_technology", "ashp_gas"]], "label": "ASHP-Gas Hybrid", "colour": "#8BE8EF"}
       ]
     }
   },
@@ -45,7 +45,7 @@
       "label": "Possible heatnet consumers",
       "category": "ENERGY",
       "buckets": [
-        {"kind": "match", "match": [["dh_potential", "true"]], "label": "Potential buildings", "colour": "#d17171"}
+        {"kind": "match", "match": [["dh_potential", "true"]], "label": "Potential consumer", "colour": "#8f4343"}
       ]
     }
   }

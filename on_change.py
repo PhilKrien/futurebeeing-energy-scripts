@@ -41,6 +41,14 @@ with open("energy_files/energy_import_variables.json", "r") as f:
 with open("energy_files/energy_legend_settings.json", "r") as f:
     LEGEND_SETTINGS = json.load(f)
 
+# Import the stats initialization pattern (only stats_name_dict is used here -- this
+# pipeline updates existing published stats rather than creating new ones from init_stats)
+with open("energy_files/energy_stats_init.json", "r") as f:
+    STATS_INIT = json.load(f)
+# STATS_INIT["stats_name_dict"] maps a stat's human-readable "name" back to the
+# energy_stats key that holds its value.
+STAT_NAME_TO_KEY = STATS_INIT["stats_name_dict"]
+
 # Import the settings necessary for different legends
 with open("energy_files/energy_input_init.json", "r") as f:
     INPUT_INIT = json.load(f)
@@ -191,12 +199,36 @@ def fetch_tagged_buildings(scenario_id):
     log.info(f"Kept {len(features)} features with polygons.")
     return features
 
+def _sanitize_patch(patch):
+    """Strips fields the /v1/geojson PATCH schema rejects on a raw fetched Feature
+    (top-level "type", properties' "osm_id"/"created_at") and coerces tag values to
+    strings, since tags are stored as hstore (string-only)."""
+    patch = dict(patch)
+    patch.pop("type", None)
+    properties = patch.get("properties")
+    if properties:
+        properties = dict(properties)
+        properties.pop("osm_id", None)
+        properties.pop("created_at", None)
+        tags = properties.get("tags")
+        if tags:
+            properties["tags"] = {
+                key: value if value is None or isinstance(value, str)
+                else "true" if value is True
+                else "false" if value is False
+                else str(value)
+                for key, value in tags.items()
+            }
+        patch["properties"] = properties
+    return patch
+
 def update_buildings(patches):
     """patches: list of {"id": feature_id, "properties": {"tags": {...}}} (or any of the other
     allowed OSM properties instead of/alongside tags). Only the fields you include are changed.
     Recorded as a changeset attributed to this script - visible (and revertible) from the
     scenario's History tab, same as a person's own edits."""
     log.info(f"Updating {len(patches)} features")
+    patches = [_sanitize_patch(patch) for patch in patches]
     resp = requests.patch(f"{API_BASE}/v1/geojson", headers=HEADERS, json=patches)
     resp.raise_for_status()
 
@@ -988,8 +1020,9 @@ def calc_systems_update(tagged_features, area):
 def update_energy_patches(energy_stats, existing_stats):
     """Writes the computed energy_stats values into the matching existing stat rows.
 
-    For every existing stat whose name is also a key in energy_stats, overwrites its
-    scenarioValue with the (int-cast) computed value.
+    For every existing stat whose displayed name maps (via STAT_NAME_TO_KEY) to a key
+    present in energy_stats, overwrites its scenarioValue with the (int-cast) computed
+    value.
 
     Args:
         energy_stats: Dict {stat_name: value}, as returned by calc_systems_update.
@@ -1000,9 +1033,9 @@ def update_energy_patches(energy_stats, existing_stats):
         The existing_stats list, mutated in place.
     """
     for energy_stat in existing_stats:
-        name = energy_stat["name"]
-        if name in energy_stats:
-            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[name])
+        key = STAT_NAME_TO_KEY.get(energy_stat["name"])
+        if key in energy_stats:
+            energy_stat["scenarioValue"]["quantative"] = int(energy_stats[key])
 
     return existing_stats
 

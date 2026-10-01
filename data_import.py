@@ -63,6 +63,10 @@ with open("energy_files/energy_legend_settings.json", "r") as f:
 # Import the settings necessary for different legends
 with open("energy_files/energy_stats_init.json", "r") as f:
     STATS_INIT = json.load(f)
+INIT_STATS = STATS_INIT["init_stats"]
+# STATS_INIT["stats_name_dict"] maps a stat's human-readable "name" back to the
+# energy_stats key that holds its value.
+STAT_NAME_TO_KEY = STATS_INIT["stats_name_dict"]
 
 # Import the settings necessary for different legends
 with open("energy_files/energy_input_init.json", "r") as f:
@@ -309,12 +313,36 @@ def fetch_features(scenario_id):
     return building_features, line_features
 
 
+def _sanitize_patch(patch):
+    """Strips fields the /v1/geojson PATCH schema rejects on a raw fetched Feature
+    (top-level "type", properties' "osm_id"/"created_at") and coerces tag values to
+    strings, since tags are stored as hstore (string-only)."""
+    patch = dict(patch)
+    patch.pop("type", None)
+    properties = patch.get("properties")
+    if properties:
+        properties = dict(properties)
+        properties.pop("osm_id", None)
+        properties.pop("created_at", None)
+        tags = properties.get("tags")
+        if tags:
+            properties["tags"] = {
+                key: value if value is None or isinstance(value, str)
+                else "true" if value is True
+                else "false" if value is False
+                else str(value)
+                for key, value in tags.items()
+            }
+        patch["properties"] = properties
+    return patch
+
 def update_features(patches):
     """patches: list of {"id": feature_id, "properties": {"tags": {...}}} (or any of the other
     allowed OSM properties instead of/alongside tags). Only the fields you include are changed.
     Recorded as a changeset attributed to this script - visible (and revertible) from the
     scenario's History tab, same as a person's own edits."""
     log.info(f"Updating {len(patches)} features")
+    patches = [_sanitize_patch(patch) for patch in patches]
     resp = requests.patch(f"{API_BASE}/v1/geojson", headers=HEADERS, json=patches)
     resp.raise_for_status()
 
@@ -619,30 +647,30 @@ def build_building_tags(row):
 
 
 def create_energy_patches(energy_stats, scenario_id):
-    """Builds the patch list for the stats endpoint from the STATS_INIT template and the
+    """Builds the patch list for the stats endpoint from the INIT_STATS template and the
     computed energy_stats.
 
-    Iterates over the global STATS_INIT template (the fixed order/structure of every
-    possible stat) and, for every entry whose "name" appears in energy_stats, overwrites
-    startValue and scenarioValue with the computed value (as int).
+    Iterates over the global INIT_STATS template (the fixed order/structure of every
+    possible stat) and, for every entry whose displayed "name" maps (via
+    STAT_NAME_TO_KEY) to a key present in energy_stats, overwrites startValue and
+    scenarioValue with the computed value (as int).
 
     Args:
         energy_stats: Dict {stat_name: value}, as returned by calc_systems().
         scenario_id: ID of the scenario the stats belong to.
 
     Returns:
-        List of the (mutated) stat dicts from STATS_INIT, each with scenarioId set and,
+        List of the (mutated) stat dicts from INIT_STATS, each with scenarioId set and,
         where available, updated values.
     """
-    init_json = STATS_INIT
-    energy_stats_keys = energy_stats.keys()
+    init_json = INIT_STATS
     for stat in init_json:
-        name = stat["name"]
         stat["scenarioId"] = scenario_id
-        if name in energy_stats_keys:
-            stat["startValue"]["quantative"] = int(energy_stats[name])
-            stat["scenarioValue"]["quantative"] = int(energy_stats[name])
-    return init_json 
+        key = STAT_NAME_TO_KEY.get(stat["name"])
+        if key in energy_stats:
+            stat["startValue"]["quantative"] = int(energy_stats[key])
+            stat["scenarioValue"]["quantative"] = int(energy_stats[key])
+    return init_json
 
 
 def create_insert_tags(buildings_data, osm_gdf, feature_list):

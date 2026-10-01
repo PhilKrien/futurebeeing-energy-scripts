@@ -1,6 +1,6 @@
-[
+{"init_stats": [
     {
-        "name": "total_heat_demand",
+        "name": "Total heat demand",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -12,10 +12,11 @@
         "visible": true,
         "source": "OEP Dataset",
         "category": "ENERGY",
-        "subcategory": "demand"
+        "subcategory": "Demands",
+        "icon": "thermometer"
     },
     {
-        "name": "total_electricity_demand",
+        "name": "Total electricity demand",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -27,10 +28,11 @@
         "visible": true,
         "source": "OEP Dataset",
         "category": "ENERGY",
-        "subcategory": "demand"
+        "subcategory": "Demands",
+        "icon": "plug"
     },
     {
-        "name": "min_refurbishment_state",
+        "name": "Minimum refurbishment state",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 1
@@ -42,10 +44,11 @@
         "visible": true,
         "source": "User setting",
         "category": "ENERGY",
-        "subcategory": "scenario_setting"
+        "subcategory": "Building settings",
+        "icon": "building-factory-2"
     },
     {
-        "name": "total_pv_production",
+        "name": "Total PV production",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -57,10 +60,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "production"
+        "subcategory": "Energy Production",
+        "icon": "sun"
     },
     {
-        "name": "total_heat_production",
+        "name": "Total heat production",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -72,10 +76,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "production"
+        "subcategory": "production",
+        "icon": "thermometer"
     },
     {
-        "name": "total_emission",
+        "name": "Total emissions",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -83,14 +88,15 @@
         "scenarioValue": {
             "quantative": 0
         },
-        "statType": "gCO2_per_a",
+        "statType": "tCO2_per_a",
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
-        "subcategory": "emissions"
+        "subcategory": "Emissions",
+        "icon": "flame"
     },
     {
-        "name": "self_sufficiency",
+        "name": "Self sufficiency",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -102,10 +108,11 @@
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
-        "subcategory": "kpi"
+        "subcategory": "KPIs",
+        "icon": "plug"
     },
     {
-        "name": "energy_sharing_potential",
+        "name": "Energy sharing potential",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -117,10 +124,11 @@
         "visible": true,
         "source": "Calculation",
         "category": "ENERGY",
-        "subcategory": "kpi"
+        "subcategory": "KPIs",
+        "icon": "plug"
     },
     {
-        "name": "total_gas_import",
+        "name": "Total gas imports",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -132,10 +140,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "imports"
+        "subcategory": "Imports",
+        "icon": "flame"
     },
     {
-        "name": "total_electricity_import",
+        "name": "total electricity imports",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -147,10 +156,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "imports"
+        "subcategory": "Imports",
+        "icon": "plug"
     },
     {
-        "name": "total_electricity_export",
+        "name": "total electricity export",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -162,10 +172,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "exports"
+        "subcategory": "Exports",
+        "icon": "plug"
     },
     {
-        "name": "total_gas_cost",
+        "name": "Total gas cost",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -177,10 +188,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "plug"
     },
     {
-        "name": "total_electricity_cost",
+        "name": "Total electricity costs",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -192,10 +204,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "plug"
     },
     {
-        "name": "transformation_cost",
+        "name": "Transformation costs",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -207,11 +220,12 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "gauge"
     },
     
     {
-        "name": "total_gas_heating_cap_invest",
+        "name": "Total installed gas heating power",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -219,14 +233,15 @@
         "scenarioValue": {
             "quantative": 0
         },
-        "statType": "euro",
+        "statType": "kW",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "installed_capacities"
+        "subcategory": "Installed capacities",
+        "icon": "flame"
     },
     {
-        "name": "total_gas_heating_cost_invest",
+        "name": "Total gas heating investments",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -238,10 +253,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "flame"
     },
     {
-        "name": "total_ashp_heating_cap_invest",
+        "name": "Total installed ASHP power",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -249,44 +265,15 @@
         "scenarioValue": {
             "quantative": 0
         },
-        "statType": "euro",
+        "statType": "kW",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "installed_capacities"
+        "subcategory": "Installed capacities",
+        "icon": "thermometer"
     },
     {
-        "name": "total_ashp_heating_cost_invest",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "euro_per_a",
-        "visible": true,
-        "source": "MOSAIQ",
-        "category": "ENERGY",
-        "subcategory": "costs"
-    },
-    {
-        "name": "total_dh_heating_cap_invest",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "euro",
-        "visible": true,
-        "source": "MOSAIQ",
-        "category": "ENERGY",
-        "subcategory": "installed_capacities"
-    },
-    {
-        "name": "total_dh_heating_cost_invest",
+        "name": "Total ASHP investments",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -298,10 +285,11 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "thermometer"
     },
     {
-        "name": "total_thermal_storage_cap_invest",
+        "name": "Total installed district heat power",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -309,44 +297,15 @@
         "scenarioValue": {
             "quantative": 0
         },
-        "statType": "euro",
+        "statType": "kW",
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "installed_capacities"
+        "subcategory": "Installed capacities",
+        "icon": "thermometer"
     },
     {
-        "name": "total_thermal_storage_cost_invest",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "euro_per_a",
-        "visible": true,
-        "source": "MOSAIQ",
-        "category": "ENERGY",
-        "subcategory": "costs"
-    },
-    {
-        "name": "total_photovoltaic_cap_invest",
-        "scenarioId": "empty",
-        "startValue": {
-            "quantative": 0
-        },
-        "scenarioValue": {
-            "quantative": 0
-        },
-        "statType": "euro",
-        "visible": true,
-        "source": "MOSAIQ",
-        "category": "ENERGY",
-        "subcategory": "installed_capacities"
-    },
-    {
-        "name": "total_photovoltaic_cost_invest",
+        "name": "Total district heat investments",
         "scenarioId": "empty",
         "startValue": {
             "quantative": 0
@@ -358,6 +317,132 @@
         "visible": true,
         "source": "MOSAIQ",
         "category": "ENERGY",
-        "subcategory": "costs"
+        "subcategory": "Costs",
+        "icon": "thermometer"
+    },
+    {
+        "name": "Total installed thermal storage capacity",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "kWh",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Installed capacities",
+        "icon": "thermometer"
+    },
+    {
+        "name": "Total thermal storage investments",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "euro_per_a",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Costs",
+        "icon": "thermometer"
+    },
+    {
+        "name": "Total installed battery storage capacity",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "kWh",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Installed capacities",
+        "icon": "battery-charging"
+    },
+    {
+        "name": "Total battery storage investments",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "euro_per_a",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Costs",
+        "icon": "battery-charging"
+    },
+    {
+        "name": "Total installed PV power",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "kW",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Installed capacities",
+        "icon": "sun"
+    },
+    {
+        "name": "Total PV investments",
+        "scenarioId": "empty",
+        "startValue": {
+            "quantative": 0
+        },
+        "scenarioValue": {
+            "quantative": 0
+        },
+        "statType": "euro_per_a",
+        "visible": true,
+        "source": "MOSAIQ",
+        "category": "ENERGY",
+        "subcategory": "Costs",
+        "icon": "sun"
     }
-]
+],
+    "stats_name_dict": {
+        "Total heat demand": "total_heat_demand",
+        "Total electricity demand": "total_electricity_demand",
+        "Minimum refurbishment state": "min_refurbishment_state",
+        "Total PV production": "total_pv_production",
+        "Total heat production": "total_heat_production",
+        "Total emissions": "total_emission",
+        "Self sufficiency": "self_sufficiency",
+        "Energy sharing potential": "energy_sharing_potential",
+        "Total gas imports": "total_gas_import",
+        "total electricity imports": "total_electricity_import",
+        "total electricity export": "total_electricity_export",
+        "Total gas cost": "total_gas_cost",
+        "Total electricity costs": "total_electricity_cost",
+        "Transformation costs": "transformation_cost",
+        "Total installed gas heating power": "total_gas_heating_cap_invest",
+        "Total gas heating investments": "total_gas_heating_cost_invest",
+        "Total installed ASHP power": "total_ashp_heating_cap_invest",
+        "Total ASHP investments": "total_ashp_heating_cost_invest",
+        "Total installed district heat power": "total_dh_heating_cap_invest",
+        "Total district heat investments": "total_dh_heating_cost_invest",
+        "Total installed thermal storage capacity": "total_thermal_storage_cap_invest",
+        "Total thermal storage investments": "total_thermal_storage_cost_invest",
+        "Total installed battery storage capacity": "total_battery_cap_invest",
+        "Total battery storage investments": "total_battery_cost_invest",
+        "Total installed PV power": "total_photovoltaic_cap_invest",
+        "Total PV investments": "total_photovoltaic_cost_invest"
+    }
+}

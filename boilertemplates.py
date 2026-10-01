@@ -56,12 +56,36 @@ def create_buildings(scenario_id, features):
     log.info(f"Created {len(ids)} features for scenario {scenario_id}")
     return ids
 
+def _sanitize_patch(patch):
+    """Strips fields the /v1/geojson PATCH schema rejects on a raw fetched Feature
+    (top-level "type", properties' "osm_id"/"created_at") and coerces tag values to
+    strings, since tags are stored as hstore (string-only)."""
+    patch = dict(patch)
+    patch.pop("type", None)
+    properties = patch.get("properties")
+    if properties:
+        properties = dict(properties)
+        properties.pop("osm_id", None)
+        properties.pop("created_at", None)
+        tags = properties.get("tags")
+        if tags:
+            properties["tags"] = {
+                key: value if value is None or isinstance(value, str)
+                else "true" if value is True
+                else "false" if value is False
+                else str(value)
+                for key, value in tags.items()
+            }
+        patch["properties"] = properties
+    return patch
+
 def update_buildings(patches):
     """patches: list of {"id": feature_id, "properties": {"tags": {...}}} (or any of the other
     allowed OSM properties instead of/alongside tags). Only the fields you include are changed.
     Recorded as a changeset attributed to this script - visible (and revertible) from the
     scenario's History tab, same as a person's own edits."""
     log.info(f"Updating {len(patches)} features")
+    patches = [_sanitize_patch(patch) for patch in patches]
     resp = requests.patch(f"{API_BASE}/v1/geojson", headers=HEADERS, json=patches)
     resp.raise_for_status()
 
