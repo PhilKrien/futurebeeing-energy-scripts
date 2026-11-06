@@ -1,0 +1,45 @@
+{
+    "inputs_to_adapt": {
+        "categories": {
+            "hp_setting": {"default": "hp"},
+            "dh_setting": {"default": "district_heat"},
+            "ashp_gas_setting": {"default": "ashp_gas"}
+        },
+        "bools": {
+            "pv_setting": {"min": "pv_activated_data", "default": "pv_activated"}
+        }
+    },
+"inputs":
+        [
+        {"key": "central_pv_setting", "label": "PV Systems potential covered", "category": "ENERGY", "type": "slider",
+         "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Central energy systems"},
+
+        {"key": "central_ashp_gas_setting", "label": "Hybrid heat pump share", "category": "ENERGY", "type": "slider",
+        "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Central energy systems"},
+
+        {"key": "central_chp_setting", "label": "Combined heat power plant share", "category": "ENERGY", "type": "slider",
+         "min": 0, "max": 100, "default": 100, "unit": "%", "subcategory": "Central energy systems"},
+
+        {"key": "central_hp_setting", "label": "Heat pump share", "category": "ENERGY", "type": "slider",
+         "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Central energy systems"},
+
+        {"key": "consider_ates", "label": "Consider ATES Storage", "category": "ENERGY", "type": "toggle", "default": false, "subcategory": "Central energy systems"},
+
+        {"key": "pv_setting", "label": "PV systems potential usage", "category": "ENERGY", "type": "slider",
+        "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Decentral energy systems"},
+
+        {"key": "dh_setting", "label": "District heat potential usage", "category": "ENERGY", "type": "slider",
+         "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Decentral energy systems"},
+
+        {"key": "hp_setting", "label": "Heat pumps potential usage", "category": "ENERGY", "type": "slider",
+        "min": 0, "max": 100, "default": 0, "unit": "%", "subcategory": "Decentral energy systems"},
+
+        {"key": "set_ashp_gas", "label": "Use hybrid heat pumps", "category": "ENERGY", "type": "toggle", "default": false, "subcategory": "Decentral energy systems"},
+
+        {"key": "min_refurb_state", "label": "Minimum refurbishment state", "category": "ENERGY", "type": "slider",
+         "min": 1, "max": 3, "default": 1, "unit": "", "subcategory": "Building settings"},
+
+        {"key": "mosaiq_activated", "label": "Compute MOSAIQ solution", "category": "ENERGY", "type": "toggle", "default": false, "subcategory": "MOSAIQ"}
+
+]
+}

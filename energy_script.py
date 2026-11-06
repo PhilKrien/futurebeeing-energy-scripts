@@ -105,7 +105,11 @@ def parse_profile(value):
     a single comma-separated string -- this handles both.
     """
     if isinstance(value, str):
-        return value.split(",")
+        # Handles both the OEP's comma-separated form and the "str(list)" form a
+        # profile takes after a round trip through the backend's hstore tag storage
+        # ("[1.0, 2.0]" -> ["1.0", " 2.0"]), plus the Postgres array literal form
+        # ("{1.0, 2.0}"); float() tolerates the leftover spaces.
+        return [piece for piece in value.strip("{}[] ").split(",") if piece.strip() != ""]
     return value
 
 
@@ -329,6 +333,10 @@ def _post_oep_advanced_search(query, max_attempts=3):
         if response.ok:
             return response
         last_response = response
+        if response.status_code == 404:
+            # Permanent ("Table does not exist"), not the flaky 400s -- no point retrying.
+            log.warning(f"OEP advanced search answered 404 (not retried): {response.text[:200]}")
+            break
         log.warning(
             f"OEP advanced search failed (attempt {attempt}/{max_attempts}): "
             f"{response.status_code} {response.text[:500]}"
@@ -383,9 +391,11 @@ def import_oep_bbox_data(bbox):
                 {"type": "function", "function": "ST_Intersects",
                     "operands": [
                         {"type": "column", "column": "geometry"},
+                        # ST_MakeEnvelope(xmin, ymin, xmax, ymax) -- bbox is
+                        # [min_lon, min_lat, max_lon, max_lat], so its entries go in in order.
                         {"type": "function", "function": "ST_MakeEnvelope",
-                        "operands": [{"type":"value","value":bbox[0]}, {"type":"value","value":bbox[3]},
-                                    {"type":"value","value":bbox[2]}, {"type":"value","value":bbox[1]},
+                        "operands": [{"type":"value","value":bbox[0]}, {"type":"value","value":bbox[1]},
+                                    {"type":"value","value":bbox[2]}, {"type":"value","value":bbox[3]},
                                     {"type":"value","value":4326}]}
                     ]}
             ]
@@ -395,7 +405,27 @@ def import_oep_bbox_data(bbox):
     response = _post_oep_advanced_search(query)
 
     result = response.json()
-    # Response format per OEP docs: {"data": [[row1_col1, ...], [row2_col1, ...], ...]}
+    # Response format per OEP docs: {"data": [[row1_col1, ...], [row2_col1, ...], ...]}.
+    # A bbox with no matches comes back as 200 WITHOUT a "data" key (just
+    # "content": {"rowcount": 0, ...}) -- guard against that (like
+    # fetch_multiple_system_ids_advanced) instead of dying with a bare KeyError, and
+    # log the full response body so an OEP 200-with-error-body flake stays diagnosable.
+    rowcount = result.get("content", {}).get("rowcount")
+    if "data" not in result:
+        log.error(
+            f"OEP bbox query against {SCHEMA}.{TABLE} returned no 'data' key "
+            f"(rowcount={rowcount}) for bbox {bbox} -- full response: {str(result)[:1000]}"
+        )
+        if rowcount == 0:
+            raise RuntimeError(
+                f"No buildings in {SCHEMA}.{TABLE} intersect the scenario's bbox {bbox} -- "
+                "the scenario is probably drawn outside the OEP data's coverage area "
+                "(or contains no buildings at all)."
+            )
+        raise RuntimeError(
+            f"OEP bbox query against {SCHEMA}.{TABLE} returned no 'data' key "
+            f"(rowcount={rowcount}); full response: {str(result)[:1000]}"
+        )
     buildings = pd.DataFrame(result["data"], columns=COLUMNS + ["geojson"])
     buildings["geometry"] = buildings["geojson"].apply(lambda g: shape(json.loads(g)))
     buildings.drop(columns="geojson", inplace=True)
@@ -461,7 +491,16 @@ def fetch_multiple_system_ids_advanced(system_ids, table_name, column_names):
         }
     }
 
-    res = _post_oep_advanced_search(query)
+    try:
+        res = _post_oep_advanced_search(query)
+    except requests.exceptions.HTTPError as err:
+        if err.response is not None and err.response.status_code == 404:
+            raise RuntimeError(
+                f"OEP table '{table_name}' does not exist -- the case data needed for the "
+                f"{len(set(system_ids))} distinct system_id(s) of this scenario is missing "
+                "on the OEP"
+            ) from err
+        raise
     result = res.json()
 
     column_names = [col[0] for col in result.get("content", {}).get("description", [])]
@@ -1036,7 +1075,7 @@ def calc_heatline_density(line_gdf, tagged_features, case):
 
     # Tag each building with the base_heatline density of its nearest pipe
     for feature, pipe_idx in zip(tagged_features, feature_pipe_idx):
-        if heat_line_dict[pipe_idx]["base_heatline"] > 1500:
+        if heat_line_dict[pipe_idx]["base_heatline"] > 1500 and feature["properties"]["tags"]["heat_technology_data"] != "district_heat":
             feature["properties"]["tags"]["dh_potential"] = "true"
         else:
             feature["properties"]["tags"]["dh_potential"] = "false"
@@ -1203,9 +1242,25 @@ def calc_systems(tagged_features, buildings_to_set, script_type, country):
     for feature in tagged_features:
         feature_tags = feature["properties"]["tags"]
         for tag, value in feature_tags.items():
-            if isinstance(value, list):
-                if f"summed_{tag}" in summed_values:
-                    summed_values[f"summed_{tag}"] += np.array(parse_profile(value), dtype=float)
+            # Profiles are lists straight from the OEP, but come back as one
+            # comma-separated string once they have been stored in the backend's
+            # hstore tags and re-read on a later run (see parse_profile) -- sum
+            # them in either form, or every unchanged building silently drops
+            # out of the electricity/PV profile totals on re-runs.
+            if f"summed_{tag}" in summed_values:
+                if value is not None:
+                    try:
+                        summed_values[f"summed_{tag}"] += np.array(parse_profile(value), dtype=float)
+                    except (ValueError, TypeError) as err:
+                        # Crash with the offending tag, feature and value in the log --
+                        # the stored profile strings are the one input here whose format
+                        # we don't control, so an unparseable one must be identifiable
+                        # from the run log alone.
+                        log.error(
+                            f"Cannot parse profile tag '{tag}' of feature {feature.get('id')}: {err} "
+                            f"-- value (first 200 chars): {str(value)[:200]!r}"
+                        )
+                        raise
                 # The profiles stay in the tags, they are needed again later.
 
             else:
@@ -1249,6 +1304,7 @@ def calc_systems(tagged_features, buildings_to_set, script_type, country):
                     summed_values[total_key] += feature_tags[f"photovoltaic_{pv_metric}"]  
                     
     # Calculate the sums for electricity in and exports
+    # import is for buildings and ashp
     total_electricity_import = sum(summed_values["summed_electricity_import_profile"])
     total_electricity_export = sum(summed_values["summed_electricity_export_profile"])       
 
@@ -1298,7 +1354,7 @@ def calc_systems(tagged_features, buildings_to_set, script_type, country):
     energy_stats["self_sufficiency"] = self_sufficiency * 100
     energy_stats["total_electricity_import"] = total_electricity_import
     energy_stats["total_electricity_export"] = total_electricity_export
-    energy_stats["total_electricity_cost"] = summed_values["total_building_electricity_cost"]  # + summed_values["total_ashp_import_cost"]
+    energy_stats["total_electricity_cost"] = summed_values["total_building_electricity_cost"] + summed_values["total_ashp_import_cost"]
     energy_stats["reducible_import_kwh"] = reducible_import
     energy_stats["remaining_import_kwh"] = remaining_import
     energy_stats["energy_sharing_potential"] = energy_sharing_potential * 100
@@ -1525,44 +1581,32 @@ def get_tech_states(tagged_features):
     return tech_states_dict
 
 
-def get_changed_systems(tech_states_before, tech_states_after, tagged_features):
-    features_to_change = {"hp_only_cases": [], "hp_pv_cases": [], "gas_only_cases": [], "gas_pv_cases": [], 
-                          "ashp_gas_only_cases": [], "ashp_gas_pv_cases": [], "dh_only_cases": [], "dh_pv_cases": []}
+CASE_KEYS = {
+    ("hp", False): "hp_only_cases", ("hp", True): "hp_pv_cases",
+    ("gas", False): "gas_only_cases", ("gas", True): "gas_pv_cases",
+    ("ashp_gas", False): "ashp_gas_only_cases", ("ashp_gas", True): "ashp_gas_pv_cases",
+    ("district_heat", False): "dh_only_cases", ("district_heat", True): "dh_pv_cases",
+}
+
+
+def get_changed_systems(tech_states_before, tech_states_after, tagged_features, refurb_changed_ids=()):
+    """Groups the buildings whose system data must be re-imported into their case lists.
+
+    A building needs a re-import when its (heat_technology, pv_activated) changed, or when
+    its refurbishment state changed (new heat_cluster -> new system_id -> new production
+    and emission values), even if the technology stayed the same.
+    """
+    features_to_change = {case_key: [] for case_key in CASE_KEYS.values()}
+    features_by_id = {feature["id"]: feature for feature in tagged_features}
     for feature_id in tech_states_before:
-        if tech_states_before[feature_id] != tech_states_after[feature_id]:
-            state = tech_states_after[feature_id][0]
-            pv_state = tech_states_after[feature_id][1]
-            if state == "hp":
-                if pv_state == "true":
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["hp_pv_cases"].append(feature_id)
-                else:
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["hp_only_cases"].append(feature_id)
-            elif state == "ashp_gas":
-                if pv_state == "true":
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["ashp_gas_pv_cases"].append(feature_id)
-                else:
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["ashp_gas_only_cases"].append(feature_id)
-            elif state == "gas":
-                if pv_state == "true":
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["gas_pv_cases"].append(feature_id)
-                else:
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["gas_only_cases"].append(feature_id)
-            elif state == "district_heat":
-                if pv_state == "true":
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["dh_pv_cases"].append(feature_id)
-                else:
-                    feature_id = next((feature for feature in tagged_features if feature["id"] == feature_id), None)
-                    features_to_change["dh_only_cases"].append(feature_id)
-    
+        if tech_states_before[feature_id] != tech_states_after[feature_id] or feature_id in refurb_changed_ids:
+            state, pv_state = tech_states_after[feature_id]
+            case_key = CASE_KEYS.get((state, pv_state == "true"))
+            if case_key:
+                features_to_change[case_key].append(features_by_id[feature_id])
+
     return features_to_change
-            
+
 
 def update_heat_techs(tagged_features, inputs):
     """Intended to redistribute buildings across heating technologies according to the
@@ -1780,7 +1824,14 @@ def process_scenario_changes(scenario_id, country):
 
     fetched_inputs = fetch_inputs(scenario_id)
 
+    refurb_before = {f["id"]: f["properties"]["tags"].get("heat_cluster") for f in tagged_features}
     tagged_features = check_refurb_state(tagged_features, fetched_inputs)
+    # Buildings whose heat_cluster changed need their system data re-imported even if
+    # their technology stays the same -- otherwise their emissions keep the old demand.
+    refurb_changed_ids = {
+        f["id"] for f in tagged_features
+        if f["properties"]["tags"].get("heat_cluster") != refurb_before[f["id"]]
+    }
 
     # Recompute the heat network's line density and each building's dh_potential from the
     # refurbishment-adjusted heat_cluster values, before update_heat_techs redistributes
@@ -1796,7 +1847,10 @@ def process_scenario_changes(scenario_id, country):
     tech_states_before = get_tech_states(tagged_features)
     tagged_features = update_heat_techs(tagged_features, fetched_inputs)
     tech_states_after = get_tech_states(tagged_features)
-    buildings_to_set = get_changed_systems(tech_states_before, tech_states_after, tagged_features)
+    buildings_to_set = get_changed_systems(tech_states_before, tech_states_after, tagged_features, refurb_changed_ids)
+    systems_to_reimport = {case: len(features) for case, features in buildings_to_set.items() if features}
+    if systems_to_reimport:
+        log.info(f"Systems to re-import this run: {systems_to_reimport}")
     
     # 5. This is where the technologies would need to be imported from the OEP and matched to the buildings
     energy_stats, tagged_features = calc_systems(tagged_features, buildings_to_set, "change", country)
